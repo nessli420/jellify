@@ -112,13 +112,49 @@ Comprehensive settings for audio quality, playback options, equalizer, and accou
    npm start
    ```
 
-### Building
+### Building for Distribution
 
-To create a distributable package:
+Create a distributable Windows executable:
 
 ```bash
-npm run build
+npm run package
 ```
+
+This will generate a standalone application in the `dist/Jellify-win32-x64/` folder containing:
+- `Jellify.exe` - The main executable with your custom icon
+- All required dependencies and runtime files
+- Your app's source code and resources
+
+**Output Location:** `dist/Jellify-win32-x64/`
+
+#### Custom Icon
+
+To use your own icon:
+
+1. Create or convert an icon to `.ico` format (recommended sizes: 16x16 to 256x256)
+2. Save it as `icon.ico` in the project root
+3. Run `npm run package` - the icon will automatically be embedded
+
+**Online Icon Converters:**
+- https://convertio.co/png-ico/
+- https://icoconvert.com/
+
+#### Distribution
+
+To share your built app:
+
+1. **Compress the folder:**
+   ```bash
+   Compress-Archive -Path "dist\Jellify-win32-x64" -DestinationPath "Jellify-Windows-x64.zip"
+   ```
+
+2. **Upload to GitHub Releases** (recommended for larger files)
+   - Go to your repository → Releases → Create a new release
+   - Upload the `.zip` file as a release asset
+
+3. **Alternative hosting:** Google Drive, Dropbox, or any file hosting service
+
+**Note:** The app is not code-signed, so Windows SmartScreen may show a warning on first run. This is normal for unsigned applications.
 
 ## 🎮 Usage
 

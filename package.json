@@ -1,16 +1,49 @@
 {
   "name": "jellify-electron",
   "version": "1.0.0",
-  "description": "",
+  "description": "Jellyfin music player desktop app",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "package": "electron-packager . Jellify --platform=win32 --arch=x64 --out=dist --overwrite && node_modules\\.bin\\rcedit dist\\Jellify-win32-x64\\Jellify.exe --set-icon icon.ico"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^38.3.0"
+    "electron": "^38.3.0",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2",
+    "rcedit": "^4.0.1"
+  },
+  "build": {
+    "appId": "com.jellify.electron",
+    "productName": "Jellify",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   }
 }
