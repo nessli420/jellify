@@ -1,0 +1,4 @@
+---
+alwaysApply: true
+---
+Focus on clean code, seperating all important functions into seperate files.

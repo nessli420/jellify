@@ -1,0 +1,40 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+	login: (serverUrl, username, password) =>
+		ipcRenderer.invoke('jellyfin:login', { serverUrl, username, password }),
+	getHome: () => ipcRenderer.invoke('jellyfin:getHome'),
+	getAlbumTracks: (albumId) => ipcRenderer.invoke('jellyfin:getAlbumTracks', albumId),
+	listAlbums: (startIndex = 0, limit = 60) => ipcRenderer.invoke('jellyfin:list:albums', { startIndex, limit }),
+	listPlaylists: (startIndex = 0, limit = 60) => ipcRenderer.invoke('jellyfin:list:playlists', { startIndex, limit }),
+	listArtists: (startIndex = 0, limit = 60) => ipcRenderer.invoke('jellyfin:list:artists', { startIndex, limit }),
+	getPlaylistTracks: (playlistId) => ipcRenderer.invoke('jellyfin:getPlaylistTracks', playlistId),
+	getArtistSongs: (artistId) => ipcRenderer.invoke('jellyfin:getArtistSongs', artistId),
+	getItem: (itemId) => ipcRenderer.invoke('jellyfin:getItem', itemId),
+	getCurrentUser: () => ipcRenderer.invoke('jellyfin:getCurrentUser'),
+	createPlaylist: (name, description) => ipcRenderer.invoke('jellyfin:createPlaylist', { name, description }),
+	markFavorite: (itemId) => ipcRenderer.invoke('jellyfin:markFavorite', itemId),
+	unmarkFavorite: (itemId) => ipcRenderer.invoke('jellyfin:unmarkFavorite', itemId),
+	getFavoriteSongs: () => ipcRenderer.invoke('jellyfin:getFavoriteSongs'),
+	addToPlaylist: (playlistId, itemId) => ipcRenderer.invoke('jellyfin:addToPlaylist', { playlistId, itemId }),
+	removeFromPlaylist: (playlistId, entryId) => ipcRenderer.invoke('jellyfin:removeFromPlaylist', { playlistId, entryId }),
+	getLyrics: (itemId) => ipcRenderer.invoke('jellyfin:getLyrics', itemId),
+	search: (query) => ipcRenderer.invoke('jellyfin:search', query),
+	getLibrary: (options) => ipcRenderer.invoke('jellyfin:getLibrary', options),
+	getGenres: () => ipcRenderer.invoke('jellyfin:getGenres'),
+	getUserProfile: () => ipcRenderer.invoke('jellyfin:getUserProfile'),
+	getUserById: (userId) => ipcRenderer.invoke('jellyfin:getUserById', userId),
+	getUserRecentlyPlayed: (userId, options) => ipcRenderer.invoke('jellyfin:getUserRecentlyPlayed', userId, options),
+	getRecentlyPlayed: (options) => ipcRenderer.invoke('jellyfin:getRecentlyPlayed', options),
+	getPlaybackInfo: () => ipcRenderer.invoke('jellyfin:getPlaybackInfo'),
+	saveCredentials: (serverUrl, username, password) => ipcRenderer.invoke('auth:saveCredentials', { serverUrl, username, password }),
+	loadCredentials: () => ipcRenderer.invoke('auth:loadCredentials'),
+	clearCredentials: () => ipcRenderer.invoke('auth:clearCredentials'),
+	windowMinimize: () => ipcRenderer.invoke('window:minimize'),
+	windowMaximize: () => ipcRenderer.invoke('window:maximize'),
+	windowClose: () => ipcRenderer.invoke('window:close'),
+	windowSetFullscreen: (flag) => ipcRenderer.invoke('window:setFullscreen', flag),
+	windowIsFullscreen: () => ipcRenderer.invoke('window:isFullscreen')
+});
+
+
