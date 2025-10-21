@@ -15,6 +15,30 @@ function el(tag, attrs = {}, children = []) {
 	return node;
 }
 
+function showLoginError(message) {
+	// Find or create error message element
+	let errorEl = document.getElementById('login-error-message');
+	if (!errorEl) {
+		errorEl = document.createElement('div');
+		errorEl.id = 'login-error-message';
+		errorEl.className = 'login-error-message';
+		const loginBody = document.querySelector('#panel-login') || document.querySelector('#panel-server');
+		if (loginBody) {
+			loginBody.insertBefore(errorEl, loginBody.firstChild);
+		}
+	}
+	
+	errorEl.textContent = message;
+	errorEl.style.display = 'block';
+	
+	// Auto-hide after 5 seconds
+	setTimeout(() => {
+		if (errorEl) {
+			errorEl.style.display = 'none';
+		}
+	}, 5000);
+}
+
 function renderLogin() {
 	// Hook login overlay elements
 	const tabServer = document.getElementById('tab-server');
@@ -68,10 +92,10 @@ function renderLogin() {
 			await loadUserProfile();
 			route();
 		} catch (e) {
-			alert(e.message || String(e));
-		} finally {
+			// Show error message in a non-blocking way
+			showLoginError(e.message || String(e));
 			submitBtn.disabled = false;
-			submitBtn.textContent = 'LOG IN';
+			submitBtn.textContent = 'Sign In';
 		}
 	};
 	
@@ -1267,15 +1291,17 @@ async function renderProfile(userId = null) {
 	// Fetch all data in parallel
 	const fetchPromises = isCurrentUser ? [
 		window.api.getUserProfile(),
-		window.api.getRecentlyPlayed({ limit: 10 }),
-		window.api.getPlaybackInfo()
+		window.api.getRecentlyPlayed({ limit: 50 }),
+		window.api.getPlaybackInfo(),
+		window.api.getUserStats()
 	] : [
 		window.api.getUserById(userId),
-		window.api.getUserRecentlyPlayed(userId, { limit: 10 }),
-		Promise.resolve({ ok: true, playing: null })
+		window.api.getUserRecentlyPlayed(userId, { limit: 50 }),
+		Promise.resolve({ ok: true, playing: null }),
+		Promise.resolve({ ok: false })
 	];
 	
-	const [profileRes, recentlyPlayedRes, playbackInfoRes] = await Promise.all(fetchPromises);
+	const [profileRes, recentlyPlayedRes, playbackInfoRes, statsRes] = await Promise.all(fetchPromises);
 	
 	if (!profileRes.ok) {
 		container.replaceChildren(el('div', { class: 'profile-error' }, ['Failed to load profile: ', profileRes.error]));
@@ -1283,8 +1309,9 @@ async function renderProfile(userId = null) {
 	}
 	
 	const profile = profileRes.profile;
-	const recentlyPlayed = recentlyPlayedRes.ok ? recentlyPlayedRes.tracks : [];
+	let recentlyPlayed = recentlyPlayedRes.ok ? recentlyPlayedRes.tracks : [];
 	let nowPlaying = playbackInfoRes.ok ? playbackInfoRes.playing : null;
+	let stats = statsRes.ok ? statsRes.stats : { totalPlays: 0, lastActivityDate: null, lastLoginDate: null };
 	
 	// Clear loading
 	container.replaceChildren();
@@ -1426,42 +1453,53 @@ async function renderProfile(userId = null) {
 	}
 	
 	// Recently Played Section
-	if (recentlyPlayed.length > 0) {
-		const recentSection = el('div', { class: 'profile-section' }, [
-			el('h2', { class: 'profile-section-title' }, ['Recently Played'])
-		]);
-		
-		const recentTracksTable = tracksList('', recentlyPlayed, (track) => {
-			window.player.playTrack(track, recentlyPlayed);
-		});
-		
-		recentSection.appendChild(recentTracksTable);
-		contentWrapper.appendChild(recentSection);
+	const recentSection = el('div', { class: 'profile-section' }, [
+		el('h2', { class: 'profile-section-title' }, ['Recently Played'])
+	]);
+	const recentTracksContainer = el('div', { class: 'recent-tracks-container' });
+	
+	function updateRecentlyPlayedSection() {
+		recentTracksContainer.replaceChildren();
+		if (recentlyPlayed.length > 0) {
+			const recentTracksTable = tracksList('', recentlyPlayed.slice(0, 20), (idx) => {
+				const track = recentlyPlayed[idx];
+				window.player.loadQueue([track]);
+				window.player.playIndex(0);
+			});
+			recentTracksContainer.appendChild(recentTracksTable);
+		} else {
+			recentTracksContainer.innerHTML = '<p style="text-align: center; color: rgba(255, 255, 255, 0.5); padding: 24px;">No recently played tracks</p>';
+		}
 	}
+	
+	updateRecentlyPlayedSection();
+	recentSection.appendChild(recentTracksContainer);
+	contentWrapper.appendChild(recentSection);
 	
 	// Activity Stats Section
 	const statsSection = el('div', { class: 'profile-section' }, [
 		el('h2', { class: 'profile-section-title' }, ['Account Information'])
 	]);
 	
+	const totalPlaysValue = el('div', { class: 'stat-value' }, [stats.totalPlays.toString()]);
+	const lastActivityValue = el('div', { class: 'stat-value' }, [
+		stats.lastActivityDate ? 
+			new Date(stats.lastActivityDate).toLocaleDateString() : 
+			'N/A'
+	]);
+	
 	const statsGrid = el('div', { class: 'profile-stats-grid' }, [
 		el('div', { class: 'profile-stat-card' }, [
 			el('div', { class: 'stat-icon' }, ['🎵']),
 			el('div', { class: 'stat-info' }, [
-				el('div', { class: 'stat-value' }, [
-					recentlyPlayed.reduce((sum, t) => sum + (t.playCount || 0), 0).toString()
-				]),
+				totalPlaysValue,
 				el('div', { class: 'stat-label' }, ['Total Plays'])
 			])
 		]),
 		el('div', { class: 'profile-stat-card' }, [
 			el('div', { class: 'stat-icon' }, ['📅']),
 			el('div', { class: 'stat-info' }, [
-				el('div', { class: 'stat-value' }, [
-					profile.lastActivityDate ? 
-						new Date(profile.lastActivityDate).toLocaleDateString() : 
-						'N/A'
-				]),
+				lastActivityValue,
 				el('div', { class: 'stat-label' }, ['Last Active'])
 			])
 		]),
@@ -1490,6 +1528,43 @@ async function renderProfile(userId = null) {
 	
 	container.appendChild(contentWrapper);
 	app.replaceChildren(container);
+	
+	// Set up real-time updates (only for current user)
+	if (isCurrentUser) {
+		const trackCompletedHandler = async (e) => {
+			// Refresh stats and recently played
+			try {
+				const [newStatsRes, newRecentlyPlayedRes] = await Promise.all([
+					window.api.getUserStats(),
+					window.api.getRecentlyPlayed({ limit: 50 })
+				]);
+				
+				if (newStatsRes.ok) {
+					stats = newStatsRes.stats;
+					totalPlaysValue.textContent = stats.totalPlays.toString();
+					lastActivityValue.textContent = stats.lastActivityDate ? 
+						new Date(stats.lastActivityDate).toLocaleDateString() : 
+						'N/A';
+				}
+				
+				if (newRecentlyPlayedRes.ok) {
+					recentlyPlayed = newRecentlyPlayedRes.tracks;
+					updateRecentlyPlayedSection();
+				}
+			} catch (err) {
+				console.error('Failed to refresh profile stats:', err);
+			}
+		};
+		
+		window.addEventListener('trackCompleted', trackCompletedHandler);
+		
+		// Cleanup handler when leaving profile page
+		const cleanupHandler = () => {
+			window.removeEventListener('trackCompleted', trackCompletedHandler);
+			window.removeEventListener('hashchange', cleanupHandler);
+		};
+		window.addEventListener('hashchange', cleanupHandler, { once: true });
+	}
 }
 
 // Default settings

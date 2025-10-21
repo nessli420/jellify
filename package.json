@@ -8,7 +8,7 @@
     "dev": "electron .",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
-    "package": "electron-packager . Jellify --platform=win32 --arch=x64 --out=dist --overwrite && node_modules\\.bin\\rcedit dist\\Jellify-win32-x64\\Jellify.exe --set-icon icon.ico"
+    "package": "electron-packager . Jellify --platform=win32 --arch=x64 --out=dist --overwrite"
   },
   "keywords": [],
   "author": "",

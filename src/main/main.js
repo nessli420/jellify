@@ -480,6 +480,15 @@ ipcMain.handle('jellyfin:getPlaybackInfo', async () => {
 	}
 });
 
+ipcMain.handle('jellyfin:getSessions', async () => {
+	try {
+		const sessions = await jellyfin.getSessions();
+		return { ok: true, sessions };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
 ipcMain.handle('jellyfin:getUserById', async (_e, userId) => {
 	try {
 		const user = await jellyfin.getUserById(userId);
@@ -536,6 +545,63 @@ ipcMain.handle('jellyfin:getUserRecentlyPlayed', async (_e, userId, options) => 
 		}));
 		
 		return { ok: true, tracks };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+// Playback reporting
+ipcMain.handle('jellyfin:reportPlaybackStart', async (_e, { itemId, canSeek, isMuted, isPaused }) => {
+	try {
+		const result = await jellyfin.reportPlaybackStart(itemId, canSeek, isMuted, isPaused);
+		return { ok: result.success };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:reportPlaybackProgress', async (_e, { itemId, positionTicks, isPaused, isMuted }) => {
+	try {
+		const result = await jellyfin.reportPlaybackProgress(itemId, positionTicks, isPaused, isMuted);
+		return { ok: result.success };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:reportPlaybackStopped', async (_e, { itemId, positionTicks }) => {
+	try {
+		const result = await jellyfin.reportPlaybackStopped(itemId, positionTicks);
+		return { ok: result.success };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:getUserStats', async () => {
+	try {
+		// Get comprehensive user statistics
+		const [profile, recentlyPlayed] = await Promise.all([
+			jellyfin.getUserProfile(),
+			jellyfin.getRecentlyPlayed({ limit: 1000 })
+		]);
+		
+		// Calculate total plays from all items
+		let totalPlays = 0;
+		for (const item of recentlyPlayed) {
+			if (item.UserData && item.UserData.PlayCount) {
+				totalPlays += item.UserData.PlayCount;
+			}
+		}
+		
+		return {
+			ok: true,
+			stats: {
+				totalPlays,
+				lastActivityDate: profile.LastActivityDate,
+				lastLoginDate: profile.LastLoginDate
+			}
+		};
 	} catch (err) {
 		return { ok: false, error: err && err.message ? err.message : String(err) };
 	}

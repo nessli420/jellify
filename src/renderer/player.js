@@ -120,6 +120,8 @@ let isShuffled = false;
 let repeatMode = 'off'; // 'off', 'all', 'one'
 let crossfadeInterval = null;
 let isCrossfading = false;
+let progressReportInterval = null;
+let trackStartTime = 0;
 
 function updateUiForTrack(track) {
 	titleEl.textContent = track ? track.title : 'Not Playing';
@@ -161,9 +163,19 @@ function loadQueue(tracks, startShuffled = false) {
 function playIndex(idx) {
 	if (idx < 0 || idx >= queue.length) return;
 	
-	// Add current track to recently played if exists
+	// Report playback stopped for previous track if exists
 	if (currentIndex >= 0 && currentIndex < queue.length) {
 		const prevTrack = queue[currentIndex];
+		const position = audio.currentTime || 0;
+		const positionTicks = Math.floor(position * 10000000); // Convert to ticks
+		
+		// Report to Jellyfin
+		if (window.api && prevTrack.id) {
+			window.api.reportPlaybackStopped(prevTrack.id, positionTicks).catch(err => {
+				console.error('Failed to report playback stopped:', err);
+			});
+		}
+		
 		addToRecentlyPlayed(prevTrack);
 	}
 	
@@ -173,6 +185,12 @@ function playIndex(idx) {
 		crossfadeInterval = null;
 	}
 	isCrossfading = false;
+	
+	// Clear progress report interval
+	if (progressReportInterval) {
+		clearInterval(progressReportInterval);
+		progressReportInterval = null;
+	}
 	
 	// Restore volume if it was reduced by crossfade
 	audio.volume = currentVolume;
@@ -193,11 +211,28 @@ function playIndex(idx) {
 	currentIndex = idx;
 	const track = queue[currentIndex];
 	audio.src = track.streamUrl;
+	trackStartTime = Date.now();
 	
 	// Properly handle audio.play() promise to ensure playback starts
 	const playPromise = audio.play();
 	if (playPromise !== undefined) {
-		playPromise.catch(error => {
+		playPromise.then(() => {
+			// Report playback start to Jellyfin
+			if (window.api && track.id) {
+				window.api.reportPlaybackStart(track.id, true, false, false).catch(err => {
+					console.error('Failed to report playback start:', err);
+				});
+				
+				// Start reporting progress every 10 seconds
+				progressReportInterval = setInterval(() => {
+					const position = audio.currentTime || 0;
+					const positionTicks = Math.floor(position * 10000000);
+					window.api.reportPlaybackProgress(track.id, positionTicks, audio.paused, false).catch(err => {
+						console.error('Failed to report playback progress:', err);
+					});
+				}, 10000);
+			}
+		}).catch(error => {
 			console.error('Playback failed:', error);
 			// Update UI to reflect paused state if playback fails
 			updatePlayPauseButton(true);
@@ -401,7 +436,25 @@ function startCrossfade(duration, timeRemaining) {
 
 audio.addEventListener('ended', () => {
 	if (!isCrossfading) {
-	next();
+		// Report track as completed
+		const track = getCurrentTrack();
+		if (track && track.id && window.api) {
+			const positionTicks = Math.floor(audio.duration * 10000000); // Report full duration
+			window.api.reportPlaybackStopped(track.id, positionTicks).catch(err => {
+				console.error('Failed to report playback completion:', err);
+			});
+			
+			// Dispatch event for profile page to refresh if it's open
+			window.dispatchEvent(new CustomEvent('trackCompleted', { detail: { track } }));
+		}
+		
+		// Clear progress reporting
+		if (progressReportInterval) {
+			clearInterval(progressReportInterval);
+			progressReportInterval = null;
+		}
+		
+		next();
 	}
 });
 

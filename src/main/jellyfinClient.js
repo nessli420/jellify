@@ -658,6 +658,79 @@ class JellyfinClient {
 		}
 	}
 
+	// Playback reporting methods
+	async reportPlaybackStart(itemId, canSeek = true, isMuted = false, isPaused = false) {
+		this.assertLoggedIn();
+		
+		const data = {
+			ItemId: itemId,
+			CanSeek: canSeek,
+			IsMuted: isMuted,
+			IsPaused: isPaused,
+			PlayMethod: 'DirectStream',
+			PlaySessionId: this.deviceId
+		};
+		
+		try {
+			await this.apiPost(`/Sessions/Playing`, data);
+			return { success: true };
+		} catch (err) {
+			console.error('Failed to report playback start:', err);
+			return { success: false, error: err.message };
+		}
+	}
+	
+	async reportPlaybackProgress(itemId, positionTicks, isPaused = false, isMuted = false) {
+		this.assertLoggedIn();
+		
+		const data = {
+			ItemId: itemId,
+			PositionTicks: positionTicks,
+			IsPaused: isPaused,
+			IsMuted: isMuted,
+			PlayMethod: 'DirectStream',
+			PlaySessionId: this.deviceId
+		};
+		
+		try {
+			await this.apiPost(`/Sessions/Playing/Progress`, data);
+			return { success: true };
+		} catch (err) {
+			console.error('Failed to report playback progress:', err);
+			return { success: false, error: err.message };
+		}
+	}
+	
+	async reportPlaybackStopped(itemId, positionTicks) {
+		this.assertLoggedIn();
+		
+		const data = {
+			ItemId: itemId,
+			PositionTicks: positionTicks,
+			PlaySessionId: this.deviceId
+		};
+		
+		try {
+			await this.apiPost(`/Sessions/Playing/Stopped`, data);
+			return { success: true };
+		} catch (err) {
+			console.error('Failed to report playback stopped:', err);
+			return { success: false, error: err.message };
+		}
+	}
+	
+	async getUserItemData(itemId) {
+		this.assertLoggedIn();
+		
+		try {
+			const data = await this.apiGet(`/Users/${this.userId}/Items/${itemId}`);
+			return data?.UserData || null;
+		} catch (err) {
+			console.error('Failed to get user item data:', err);
+			return null;
+		}
+	}
+
 	// Note: Playback settings are stored locally as Jellyfin API doesn't allow client modification
 	// of user configuration. These settings are used client-side for playback decisions.
 }
