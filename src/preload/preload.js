@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
 	listArtists: (startIndex = 0, limit = 60) => ipcRenderer.invoke('jellyfin:list:artists', { startIndex, limit }),
 	getPlaylistTracks: (playlistId) => ipcRenderer.invoke('jellyfin:getPlaylistTracks', playlistId),
 	getArtistSongs: (artistId) => ipcRenderer.invoke('jellyfin:getArtistSongs', artistId),
+	getArtistAlbums: (artistId) => ipcRenderer.invoke('jellyfin:getArtistAlbums', artistId),
 	getItem: (itemId) => ipcRenderer.invoke('jellyfin:getItem', itemId),
 	getCurrentUser: () => ipcRenderer.invoke('jellyfin:getCurrentUser'),
 	createPlaylist: (name, description) => ipcRenderer.invoke('jellyfin:createPlaylist', { name, description }),
@@ -41,7 +42,14 @@ contextBridge.exposeInMainWorld('api', {
 	windowMaximize: () => ipcRenderer.invoke('window:maximize'),
 	windowClose: () => ipcRenderer.invoke('window:close'),
 	windowSetFullscreen: (flag) => ipcRenderer.invoke('window:setFullscreen', flag),
-	windowIsFullscreen: () => ipcRenderer.invoke('window:isFullscreen')
+	windowIsFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),
+	// Discord RPC
+	discordUpdatePresence: (track, isPaused, currentTime, duration) => 
+		ipcRenderer.invoke('discord:updatePresence', { track, isPaused, currentTime, duration }),
+	discordClearActivity: () => ipcRenderer.invoke('discord:clearActivity'),
+	discordSetIdlePresence: () => ipcRenderer.invoke('discord:setIdlePresence'),
+	discordIsConnected: () => ipcRenderer.invoke('discord:isConnected'),
+	discordUpdateClientId: (clientId, enabled) => ipcRenderer.invoke('discord:updateClientId', { clientId, enabled })
 });
 
 

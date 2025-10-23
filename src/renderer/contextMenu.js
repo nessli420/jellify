@@ -497,7 +497,8 @@ class PlaylistContextMenu {
         const favoriteText = favoriteItem.querySelector('.ctx-favorite-text');
         const favoriteIcon = favoriteItem.querySelector('.ctx-favorite-icon path');
         
-        const isFavorite = playlist.isFavorite || false;
+        // Check both isFavorite property and UserData.IsFavorite for consistency
+        const isFavorite = playlist.isFavorite || (playlist.UserData && playlist.UserData.IsFavorite) || false;
         
         if (isFavorite) {
             favoriteText.textContent = 'Remove from favourites';
@@ -586,11 +587,17 @@ class PlaylistContextMenu {
     async toggleFavorite() {
         if (!this.currentPlaylist) return;
         
-        const isFavorite = this.currentPlaylist.isFavorite || false;
+        // Check both isFavorite property and UserData.IsFavorite for consistency
+        const isFavorite = this.currentPlaylist.isFavorite || (this.currentPlaylist.UserData && this.currentPlaylist.UserData.IsFavorite) || false;
         
         try {
-            // Update favorite state immediately
+            // Update favorite state immediately (both properties for consistency)
             this.currentPlaylist.isFavorite = !isFavorite;
+            if (this.currentPlaylist.UserData) {
+                this.currentPlaylist.UserData.IsFavorite = !isFavorite;
+            } else {
+                this.currentPlaylist.UserData = { IsFavorite: !isFavorite };
+            }
             
             // Update menu display instantly
             const favoriteItem = document.getElementById('ctx-playlist-favorite');
@@ -627,8 +634,11 @@ class PlaylistContextMenu {
             // Notify that favorites have changed so library can refresh
             window.dispatchEvent(new CustomEvent('favoritesChanged', { detail: { itemId: this.currentPlaylist.id, itemType: 'playlist' } }));
         } catch (error) {
-            // Revert on error
+            // Revert on error (both properties)
             this.currentPlaylist.isFavorite = isFavorite;
+            if (this.currentPlaylist.UserData) {
+                this.currentPlaylist.UserData.IsFavorite = isFavorite;
+            }
             console.error('Error toggling favorite:', error);
             if (window.showToast) {
                 window.showToast('Failed to update favourite', 'error');
@@ -710,7 +720,8 @@ class AlbumContextMenu {
         const favoriteText = favoriteItem.querySelector('.ctx-favorite-text');
         const favoriteIcon = favoriteItem.querySelector('.ctx-favorite-icon path');
         
-        const isFavorite = album.isFavorite || false;
+        // Check both isFavorite property and UserData.IsFavorite for consistency
+        const isFavorite = album.isFavorite || (album.UserData && album.UserData.IsFavorite) || false;
         
         if (isFavorite) {
             favoriteText.textContent = 'Remove from favourites';
@@ -759,11 +770,17 @@ class AlbumContextMenu {
     async toggleFavorite() {
         if (!this.currentAlbum) return;
         
-        const isFavorite = this.currentAlbum.isFavorite || false;
+        // Check both isFavorite property and UserData.IsFavorite for consistency
+        const isFavorite = this.currentAlbum.isFavorite || (this.currentAlbum.UserData && this.currentAlbum.UserData.IsFavorite) || false;
         
         try {
-            // Update favorite state immediately
+            // Update favorite state immediately (both properties for consistency)
             this.currentAlbum.isFavorite = !isFavorite;
+            if (this.currentAlbum.UserData) {
+                this.currentAlbum.UserData.IsFavorite = !isFavorite;
+            } else {
+                this.currentAlbum.UserData = { IsFavorite: !isFavorite };
+            }
             
             // Update menu display instantly
             const favoriteItem = document.getElementById('ctx-album-favorite');
@@ -800,8 +817,11 @@ class AlbumContextMenu {
             // Notify that favorites have changed so library can refresh
             window.dispatchEvent(new CustomEvent('favoritesChanged', { detail: { itemId: this.currentAlbum.id, itemType: 'album' } }));
         } catch (error) {
-            // Revert on error
+            // Revert on error (both properties)
             this.currentAlbum.isFavorite = isFavorite;
+            if (this.currentAlbum.UserData) {
+                this.currentAlbum.UserData.IsFavorite = isFavorite;
+            }
             console.error('Error toggling favorite:', error);
             if (window.showToast) {
                 window.showToast('Failed to update favourite', 'error');

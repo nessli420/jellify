@@ -107,7 +107,7 @@ class JellyfinClient {
 			Recursive: 'true',
 			SortBy: 'SortName',
 			Limit: String(limit),
-			Fields: 'PrimaryImageAspectRatio'
+			Fields: 'PrimaryImageAspectRatio,UserData'
 		});
 		return data?.Items || [];
 	}
@@ -129,7 +129,8 @@ class JellyfinClient {
 			IncludeItemTypes: 'MusicArtist',
 			Recursive: 'true',
 			SortBy: 'SortName',
-			Limit: String(limit)
+			Limit: String(limit),
+			Fields: 'UserData'
 		});
 		return data?.Items || [];
 	}
@@ -150,7 +151,8 @@ class JellyfinClient {
 			IncludeItemTypes: 'Playlist',
 			Recursive: 'true',
 			SortBy: 'SortName',
-			Limit: String(limit)
+			Limit: String(limit),
+			Fields: 'UserData'
 		});
 		return data?.Items || [];
 	}
@@ -193,6 +195,20 @@ class JellyfinClient {
 			ArtistIds: artistId,
 			SortBy: 'Album,IndexNumber,SortName',
 			Limit: String(limit)
+		});
+		return data?.Items || [];
+	}
+
+	async getArtistAlbums(artistId, { limit = 50 } = {}) {
+		if (!artistId) throw new Error('artistId required');
+		const data = await this.apiGet(`/Users/${this.userId}/Items`, {
+			IncludeItemTypes: 'MusicAlbum',
+			Recursive: 'true',
+			ArtistIds: artistId,
+			SortBy: 'ProductionYear,SortName',
+			SortOrder: 'Descending',
+			Limit: String(limit),
+			Fields: 'PrimaryImageAspectRatio,UserData'
 		});
 		return data?.Items || [];
 	}

@@ -532,7 +532,7 @@ async function renderArtistsPage() {
 	app.replaceChildren(view);
 }
 
-function tracksList(title, tracks, onSelect, playlistId = null) {
+function tracksList(title, tracks, onSelect, playlistId = null, isAlbumView = false) {
 	const tbody = el('tbody', {});
 	
 	function renderTracks() {
@@ -553,10 +553,23 @@ function tracksList(title, tracks, onSelect, playlistId = null) {
 			numberCell.textContent = String(idx + 1);
 		}
 		
-		const titleCell = el('td', {}, [
-			el('div', { class: 'track-title' }, [t.title || 'Untitled']),
-			t.artist ? el('div', { class: 'track-artist' }, [t.artist]) : null
-		].filter(Boolean));
+		// Album art cell
+		const artCell = el('td', { class: 'track-art-cell' });
+		if (t.image) {
+			const img = el('img', { class: 'track-art', src: t.image, alt: t.title || 'Track' });
+			artCell.appendChild(img);
+		} else {
+			const placeholder = el('div', { class: 'track-art-placeholder' });
+			placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+			artCell.appendChild(placeholder);
+		}
+		
+		const titleCell = el('td', { class: 'track-info-cell' }, [
+			el('div', { class: 'track-text-info' }, [
+				el('div', { class: 'track-title' }, [t.title || 'Untitled']),
+				t.artist ? el('div', { class: 'track-artist' }, [t.artist]) : null
+			].filter(Boolean))
+		]);
 		
 		// Duration cell with optional hidden icon on the right
 		const durationCell = el('td', { class: 'track-duration' });
@@ -568,8 +581,15 @@ function tracksList(title, tracks, onSelect, playlistId = null) {
 				</svg>
 			`;
 		} else {
-			durationCell.textContent = `${mins}:${secs}`;
+			durationCell.innerHTML = `<span class="duration-time">${mins}:${secs}</span>`;
 		}
+		
+		// Build row based on view type
+		const rowCells = [numberCell, artCell, titleCell];
+		if (!isAlbumView) {
+			rowCells.push(el('td', {}, [t.album || '']));
+		}
+		rowCells.push(durationCell);
 		
 		const row = el('tr', { 
 			onclick: () => {
@@ -577,12 +597,7 @@ function tracksList(title, tracks, onSelect, playlistId = null) {
 					onSelect(idx);
 				}
 			} 
-		}, [
-			numberCell,
-			titleCell,
-			el('td', {}, [t.album || '']),
-			durationCell
-		]);
+		}, rowCells);
 			
 			if (isHidden) {
 				row.classList.add('track-hidden');
@@ -613,17 +628,28 @@ function tracksList(title, tracks, onSelect, playlistId = null) {
 	// Re-render when favorites change
 	window.addEventListener('favoriteChanged', renderTracks);
 	
+	// Build table headers based on view type
+	const headers = [
+		el('th', {}, ['#']),
+		el('th', {}, ['']),
+		el('th', {}, ['Title'])
+	];
+	if (!isAlbumView) {
+		headers.push(el('th', {}, ['Album']));
+	}
+	headers.push(el('th', {}, ['Duration']));
+	
 	const table = el('table', { class: 'tracks' }, [
 		el('thead', {}, [
-			el('tr', {}, [
-				el('th', {}, ['#']), 
-				el('th', {}, ['Title']), 
-				el('th', {}, ['Album']), 
-				el('th', {}, ['Duration'])
-			])
+			el('tr', {}, headers)
 		]),
 		tbody
 	]);
+	
+	if (isAlbumView) {
+		table.classList.add('tracks-album-view');
+	}
+	
 	return el('div', { class: 'tracks-section' }, [table]);
 }
 
@@ -760,7 +786,7 @@ async function renderAlbumDetail(id) {
 		});
 	}
 	
-		app.replaceChildren(el('div', {}, [hero, tracksList('', allTracks, onSelect)]));
+		app.replaceChildren(el('div', {}, [hero, tracksList('', allTracks, onSelect, null, true)]));
 	};
 	
 	// Listen for hidden songs changes to re-render instantly
@@ -970,10 +996,15 @@ async function renderPlaylistDetail(id) {
 }
 
 async function renderArtistDetail(id) {
-	const [meta, res] = await Promise.all([window.api.getItem(id), window.api.getArtistSongs(id)]);
+	const [meta, res, albumsRes] = await Promise.all([
+		window.api.getItem(id), 
+		window.api.getArtistSongs(id),
+		window.api.getArtistAlbums(id)
+	]);
 	if (!meta.ok) return app.replaceChildren(el('div', { class: 'container' }, [meta.error || 'Failed to load artist']));
 	if (!res.ok) return app.replaceChildren(el('div', { class: 'container' }, [res.error || 'Failed to load songs']));
 	const item = meta.item;
+	const albums = albumsRes.ok ? albumsRes.albums : [];
 	
 	const onSelect = (i) => { 
 		window.player.loadQueue(res.tracks); 
@@ -1036,7 +1067,67 @@ async function renderArtistDetail(id) {
 		});
 	}
 	
-	app.replaceChildren(el('div', {}, [hero, tracksList('', res.tracks, onSelect)]));
+	const content = [hero];
+	
+	// Add albums section if any albums exist
+	if (albums && albums.length > 0) {
+		const albumsGrid = el('div', { class: 'home-section', style: 'padding: 0 32px 32px;' }, [
+			el('div', { class: 'section-header' }, [
+				el('h2', {}, ['Albums'])
+			]),
+			el('div', { class: 'grid' }, albums.map((album) => {
+				const imgWrapper = el('div', { class: 'card-image-wrapper' });
+				imgWrapper.setAttribute('data-type', 'album');
+				
+				const img = el('img', { src: album.image || '', alt: album.title });
+				const playBtn = createPlayButton(() => {
+					location.hash = `album/${album.id}`;
+				});
+				
+				imgWrapper.appendChild(img);
+				imgWrapper.appendChild(playBtn);
+				handleImageError(imgWrapper, img);
+				
+				const card = el('div', { class: 'card' }, [
+					imgWrapper,
+					el('div', { class: 'meta' }, [
+						el('div', { class: 'title' }, [album.title || 'Untitled']),
+						el('div', { class: 'subtitle' }, [album.subtitle || ''])
+					])
+				]);
+				
+				card.addEventListener('click', (e) => {
+					if (!e.target.closest('.card-play-btn')) {
+						location.hash = `album/${album.id}`;
+					}
+				});
+				
+				// Add album context menu
+				card.addEventListener('contextmenu', async (e) => {
+					e.preventDefault();
+					if (window.albumContextMenu) {
+						await window.albumContextMenu.show(e.clientX, e.clientY, album);
+					}
+				});
+				
+				return card;
+			}))
+		]);
+		content.push(albumsGrid);
+	}
+	
+	// Add tracks section with header
+	if (res.tracks && res.tracks.length > 0) {
+		const songsSection = el('div', { style: 'margin-top: 24px;' }, [
+			el('div', { class: 'section-header', style: 'padding: 0 32px; margin-bottom: 0;' }, [
+				el('h2', {}, ['Popular Songs'])
+			]),
+			tracksList('', res.tracks, onSelect)
+		]);
+		content.push(songsSection);
+	}
+	
+	app.replaceChildren(el('div', {}, content));
 }
 
 async function renderSearch(initialQuery = '') {
@@ -2094,6 +2185,28 @@ function savePlaybackSettings(settings) {
 	localStorage.setItem(`playbackSettings_${currentUserId}`, JSON.stringify(settings));
 }
 
+// Discord settings functions
+const DEFAULT_DISCORD_SETTINGS = {
+	enabled: false,
+	clientId: ''
+};
+
+function getDiscordSettings() {
+	const stored = localStorage.getItem('discordSettings');
+	if (stored) {
+		try {
+			return { ...DEFAULT_DISCORD_SETTINGS, ...JSON.parse(stored) };
+		} catch (e) {
+			return DEFAULT_DISCORD_SETTINGS;
+		}
+	}
+	return DEFAULT_DISCORD_SETTINGS;
+}
+
+function saveDiscordSettings(settings) {
+	localStorage.setItem('discordSettings', JSON.stringify(settings));
+}
+
 async function renderSettings() {
 	const container = el('div', { class: 'settings-page' });
 	
@@ -2323,6 +2436,84 @@ async function renderSettings() {
 	eqSection.appendChild(resetEqBtn);
 	contentWrapper.appendChild(eqSection);
 	
+	// Discord Rich Presence Section
+	const discordSection = el('div', { class: 'settings-section' }, [
+		el('h2', { class: 'settings-section-title' }, ['Discord Rich Presence'])
+	]);
+	
+	// Get Discord settings
+	const discordSettings = getDiscordSettings();
+	
+	// Discord Enable checkbox
+	const discordEnableCheckbox = el('input', { type: 'checkbox', id: 'discord-enable', class: 'settings-checkbox' });
+	discordEnableCheckbox.checked = discordSettings.enabled;
+	
+	const discordEnableGroup = el('div', { class: 'settings-group' }, [
+		el('label', { class: 'settings-checkbox-label' }, [
+			discordEnableCheckbox,
+			el('span', {}, ['Enable Discord Rich Presence'])
+		]),
+		el('p', { class: 'settings-description' }, ['Show currently playing music on your Discord profile.'])
+	]);
+	
+	discordSection.appendChild(discordEnableGroup);
+	
+	// Discord Client ID input
+	const clientIdInput = el('input', { 
+		type: 'text', 
+		id: 'discord-client-id', 
+		class: 'settings-input',
+		placeholder: 'Enter your Discord Application ID',
+		value: discordSettings.clientId || ''
+	});
+	
+	const clientIdGroup = el('div', { class: 'settings-group' }, [
+		el('label', { class: 'settings-label' }, ['Discord Application ID']),
+		el('p', { class: 'settings-description' }, [
+			'Create an application at ',
+			el('a', { href: '#', class: 'settings-link' }, ['Discord Developer Portal']),
+			' and paste your Application ID here.'
+		]),
+		clientIdInput
+	]);
+	
+	// Add click handler for the link
+	const discordLink = clientIdGroup.querySelector('.settings-link');
+	discordLink.addEventListener('click', (e) => {
+		e.preventDefault();
+		require('electron').shell.openExternal('https://discord.com/developers/applications');
+	});
+	
+	discordSection.appendChild(clientIdGroup);
+	
+	// Discord status indicator
+	const discordStatusDiv = el('div', { class: 'settings-group' }, [
+		el('label', { class: 'settings-label' }, ['Connection Status']),
+		el('div', { id: 'discord-status', class: 'discord-status-indicator' }, [
+			el('span', { class: 'status-dot' }),
+			el('span', { class: 'status-text' }, ['Checking...'])
+		])
+	]);
+	
+	discordSection.appendChild(discordStatusDiv);
+	
+	// Check Discord connection status
+	if (window.api && window.api.discordIsConnected) {
+		window.api.discordIsConnected().then(connected => {
+			const statusDot = discordStatusDiv.querySelector('.status-dot');
+			const statusText = discordStatusDiv.querySelector('.status-text');
+			if (connected) {
+				statusDot.style.backgroundColor = '#43b581';
+				statusText.textContent = 'Connected';
+			} else {
+				statusDot.style.backgroundColor = '#f04747';
+				statusText.textContent = 'Disconnected';
+			}
+		});
+	}
+	
+	contentWrapper.appendChild(discordSection);
+	
 	// Account Section
 	const accountSection = el('div', { class: 'settings-section' }, [
 		el('h2', { class: 'settings-section-title' }, ['Account'])
@@ -2356,7 +2547,7 @@ async function renderSettings() {
 	
 	// Save button
 	const saveBtn = el('button', { class: 'btn-primary settings-save-btn' }, ['Save Settings']);
-	saveBtn.addEventListener('click', () => {
+	saveBtn.addEventListener('click', async () => {
 		saveBtn.disabled = true;
 		saveBtn.textContent = 'Saving...';
 		
@@ -2379,6 +2570,18 @@ async function renderSettings() {
 			
 			// Save auto-login preference
 			localStorage.setItem('autoLoginEnabled', autoLoginCheckbox.checked);
+			
+			// Save Discord settings
+			const newDiscordSettings = {
+				enabled: discordEnableCheckbox.checked,
+				clientId: clientIdInput.value.trim()
+			};
+			saveDiscordSettings(newDiscordSettings);
+			
+			// Update Discord RPC with new settings
+			if (window.api && window.api.discordUpdateClientId) {
+				await window.api.discordUpdateClientId(newDiscordSettings.clientId, newDiscordSettings.enabled);
+			}
 			
 			showToast('Settings saved successfully', 'success');
 			saveBtn.textContent = 'Saved!';

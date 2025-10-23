@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const JellyfinClient = require('./jellyfinClient');
+const discordRPC = require('./discordRPC');
 
 /**
  * Single shared Jellyfin client per app instance.
@@ -35,6 +36,13 @@ function createMainWindow() {
 app.whenReady().then(() => {
 	createMainWindow();
 
+	// Initialize Discord RPC after a short delay to allow settings to load
+	setTimeout(() => {
+		discordRPC.connect().catch(err => {
+			console.error('Failed to initialize Discord RPC:', err);
+		});
+	}, 2000);
+
 	app.on('activate', () => {
 		if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
 	});
@@ -42,6 +50,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
 	if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', async () => {
+	// Cleanup Discord RPC
+	await discordRPC.disconnect();
 });
 
 // Store current user info
@@ -79,7 +92,9 @@ ipcMain.handle('jellyfin:getHome', async () => {
 			id: it.Id,
 			title: it.Name,
 			subtitle: (it.AlbumArtist || (it.Artists && it.Artists[0]) || ''),
-			image: jellyfin.getImageUrl(it)
+			image: jellyfin.getImageUrl(it),
+			UserData: it.UserData,
+			isFavorite: it.UserData ? it.UserData.IsFavorite : false
 		}));
 		return { ok: true, albums: withImages(albums), artists: withImages(artists), playlists: withImages(playlists) };
 	} catch (err) {
@@ -175,6 +190,23 @@ ipcMain.handle('jellyfin:getArtistSongs', async (_e, artistId) => {
 			isFavorite: t.UserData ? t.UserData.IsFavorite : false
 		}));
 		return { ok: true, tracks: playable };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:getArtistAlbums', async (_e, artistId) => {
+	try {
+		const albums = await jellyfin.getArtistAlbums(artistId, { limit: 50 });
+		const formatted = albums.map((it) => ({
+			id: it.Id,
+			title: it.Name,
+			subtitle: (it.AlbumArtist || ''),
+			image: jellyfin.getImageUrl(it),
+			UserData: it.UserData,
+			isFavorite: it.UserData ? it.UserData.IsFavorite : false
+		}));
+		return { ok: true, albums: formatted };
 	} catch (err) {
 		return { ok: false, error: err && err.message ? err.message : String(err) };
 	}
@@ -736,6 +768,47 @@ ipcMain.handle('window:isFullscreen', () => {
 		return global.mainWindow.isFullScreen();
 	}
 	return false;
+});
+
+// Discord RPC handlers
+ipcMain.handle('discord:updatePresence', async (_e, { track, isPaused, currentTime, duration }) => {
+	try {
+		await discordRPC.updatePresence(track, isPaused, currentTime, duration);
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('discord:clearActivity', async () => {
+	try {
+		await discordRPC.clearActivity();
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('discord:setIdlePresence', async () => {
+	try {
+		await discordRPC.setIdlePresence();
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('discord:isConnected', () => {
+	return discordRPC.isConnected();
+});
+
+ipcMain.handle('discord:updateClientId', async (_e, { clientId, enabled }) => {
+	try {
+		await discordRPC.updateClientId(clientId, enabled);
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
 });
 
 

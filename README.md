@@ -12,6 +12,7 @@ A beautiful, modern desktop music player for Jellyfin servers built with Electro
 - **Crossfade Support** - Smooth transitions between tracks (2-12 seconds)
 - **Equalizer** - 10-band equalizer for fine-tuned audio control
 - **Lyrics Display** - Synchronized lyrics support (LRC format) with auto-scrolling
+- **Discord Rich Presence** - Show what you're listening to on your Discord profile (just like Spotify!)
 
 ### 🎨 Beautiful Interface
 - **Modern UI** - Clean, Spotify-inspired design with smooth animations
@@ -93,6 +94,7 @@ Comprehensive settings for audio quality, playback options, equalizer, and accou
 - **Node.js** (v16 or higher)
 - **Jellyfin Server** (v10.8 or higher)
 - A music library configured in your Jellyfin server
+- **Discord** (optional, for Rich Presence integration)
 
 ### Installation
 
@@ -111,9 +113,6 @@ Comprehensive settings for audio quality, playback options, equalizer, and accou
    ```bash
    npm start
    ```
-
-### Building for Distribution
-
 #### Portable Executable (Recommended)
 
 Create a single, standalone portable executable that can run from anywhere:
@@ -121,7 +120,6 @@ Create a single, standalone portable executable that can run from anywhere:
 ```bash
 npx electron-builder --win portable
 ```
-
 This will generate a portable executable: **`dist/Jellify 1.0.0.exe`**
 
 **Benefits:**
@@ -231,6 +229,14 @@ Jellify supports synchronized lyrics in LRC format:
 - Place `.lrc` files alongside your music files
 - Click on lyrics lines to seek to that position
 - Lyrics auto-scroll and highlight as the track plays
+
+### Discord Rich Presence
+Show off your music taste to your Discord friends:
+- Displays currently playing track, artist, and album
+- Shows playback progress with a time bar
+- Updates automatically when you change tracks or pause
+- Works just like Spotify's Discord integration
+- See [DISCORD_SETUP.md](DISCORD_SETUP.md) for setup instructions
 
 ## 🤝 Contributing
 
