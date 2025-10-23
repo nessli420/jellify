@@ -148,23 +148,6 @@ To use your own icon:
 2. Save it as `icon.ico` in the project root
 3. Run the build command - the icon will automatically be embedded
 
-**Online Icon Converters:**
-- https://convertio.co/png-ico/
-- https://icoconvert.com/
-
-#### Distribution
-
-To share your built app:
-
-1. **Upload the portable executable** (`Jellify 1.0.0.exe`) directly to:
-   - GitHub Releases (recommended)
-   - Google Drive, Dropbox, or any file hosting service
-
-2. **For GitHub Releases:**
-   - Go to https://github.com/nessli420/jellify → Releases → Create a new release
-   - Upload `dist/Jellify 1.0.0.exe` as a release asset
-
-**Note:** The app is not code-signed, so Windows SmartScreen may show a warning on first run ("Windows protected your PC"). Users need to click "More info" → "Run anyway". This is normal for unsigned applications.
 
 ## 🎮 Usage
 
