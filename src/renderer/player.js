@@ -123,6 +123,100 @@ let isCrossfading = false;
 let progressReportInterval = null;
 let trackStartTime = 0;
 
+// Playback state persistence
+function savePlaybackState() {
+	try {
+		const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+		if (!userId) return;
+		
+		const state = {
+			queue: queue,
+			originalQueue: originalQueue,
+			currentIndex: currentIndex,
+			currentTime: audio.currentTime || 0,
+			isShuffled: isShuffled,
+			repeatMode: repeatMode,
+			timestamp: Date.now()
+		};
+		localStorage.setItem(`playbackState_${userId}`, JSON.stringify(state));
+	} catch (err) {
+		console.error('Failed to save playback state:', err);
+	}
+}
+
+function loadPlaybackState() {
+	try {
+		const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+		if (!userId) return false;
+		
+		const saved = localStorage.getItem(`playbackState_${userId}`);
+		if (!saved) return false;
+		
+		const state = JSON.parse(saved);
+		
+		// Don't restore if state is older than 24 hours
+		const age = Date.now() - (state.timestamp || 0);
+		if (age > 24 * 60 * 60 * 1000) {
+			localStorage.removeItem(`playbackState_${userId}`);
+			return false;
+		}
+		
+		// Restore queue
+		if (state.queue && state.queue.length > 0) {
+			queue.length = 0;
+			queue.push(...state.queue);
+			
+			originalQueue.length = 0;
+			originalQueue.push(...(state.originalQueue || state.queue));
+			
+			currentIndex = state.currentIndex || 0;
+			isShuffled = state.isShuffled || false;
+			repeatMode = state.repeatMode || 'off';
+			
+			// Restore current track
+			if (currentIndex >= 0 && currentIndex < queue.length) {
+				const track = queue[currentIndex];
+				audio.src = track.streamUrl;
+				
+				// Restore position if it was significant (more than 5 seconds)
+				if (state.currentTime && state.currentTime > 5) {
+					audio.currentTime = state.currentTime;
+				}
+				
+				updateUiForTrack(track);
+				updateShuffleButton();
+				updateRepeatButton();
+				updateQueueDisplay();
+				
+				// Don't auto-play, just prepare
+				updatePlayPauseButton(true); // Show play button
+				
+				return true;
+			}
+		}
+		
+		return false;
+	} catch (err) {
+		console.error('Failed to load playback state:', err);
+		return false;
+	}
+}
+
+// Save state periodically during playback
+let stateSaveInterval = null;
+
+function startStateSaving() {
+	if (stateSaveInterval) clearInterval(stateSaveInterval);
+	stateSaveInterval = setInterval(() => {
+		if (currentIndex >= 0 && queue.length > 0) {
+			savePlaybackState();
+		}
+	}, 10000); // Save every 10 seconds
+}
+
+// Start saving when player is initialized
+startStateSaving();
+
 function updateUiForTrack(track) {
 	titleEl.textContent = track ? track.title : 'Not Playing';
 	artistEl.textContent = track ? track.artist : '';
@@ -158,6 +252,7 @@ function loadQueue(tracks, startShuffled = false) {
 	}
 	
 	updateQueueDisplay();
+	savePlaybackState();
 }
 
 function playIndex(idx) {
@@ -195,7 +290,8 @@ function playIndex(idx) {
 	// Restore volume if it was reduced by crossfade
 	audio.volume = currentVolume;
 	if (volumeFill) {
-		volumeFill.style.width = `${currentVolume * 100}%`;
+		const sliderPos = volumeToSlider(currentVolume);
+		volumeFill.style.width = `${sliderPos * 100}%`;
 	}
 	
 	// Initialize audio context for equalizer on first play
@@ -241,10 +337,14 @@ function playIndex(idx) {
 	
 	updateUiForTrack(track);
 	updatePlayPauseButton(false); // false = playing (show pause icon)
+	savePlaybackState();
 }
 
 function getPlaybackSettings() {
-	const stored = localStorage.getItem('playbackSettings');
+	const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+	if (!userId) return { equalizer: { enabled: false } };
+	
+	const stored = localStorage.getItem(`playbackSettings_${userId}`);
 	if (stored) {
 		try {
 			return JSON.parse(stored);
@@ -342,6 +442,7 @@ function toggleShuffle() {
 	
 	updateShuffleButton();
 	updateQueueDisplay();
+	savePlaybackState();
 }
 
 function toggleRepeat() {
@@ -353,6 +454,7 @@ function toggleRepeat() {
 		repeatMode = 'off';
 	}
 	updateRepeatButton();
+	savePlaybackState();
 }
 
 function updateShuffleButton() {
@@ -394,7 +496,9 @@ audio.addEventListener('timeupdate', () => {
 	if (isCrossfading || !audio.duration) return;
 	
 	// Get crossfade settings
-	const settings = JSON.parse(localStorage.getItem('playbackSettings') || '{}');
+	const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+	const settingsKey = userId ? `playbackSettings_${userId}` : 'playbackSettings';
+	const settings = JSON.parse(localStorage.getItem(settingsKey) || '{}');
 	const crossfadeDuration = settings.crossfadeDuration || 0;
 	
 	if (crossfadeDuration > 0 && !isSeeking) {
@@ -423,7 +527,8 @@ function startCrossfade(duration, timeRemaining) {
 		
 		// Update volume slider visual during crossfade
 		if (volumeFill && !isVolumeDragging) {
-			volumeFill.style.width = `${newVolume * 100}%`;
+			const sliderPos = volumeToSlider(newVolume);
+			volumeFill.style.width = `${sliderPos * 100}%`;
 		}
 		
 		if (step >= steps || newVolume <= 0) {
@@ -893,6 +998,7 @@ function addToQueue(track) {
 	queue.push(track);
 	originalQueue.push(track);
 	updateQueueDisplay();
+	savePlaybackState();
 }
 
 // Insert track as next in queue
@@ -901,6 +1007,7 @@ function insertNext(track) {
 	queue.splice(insertIndex, 0, track);
 	originalQueue.splice(insertIndex, 0, track);
 	updateQueueDisplay();
+	savePlaybackState();
 }
 
 // Get current queue
@@ -922,28 +1029,99 @@ window.player = {
 	closeFullscreen: closeFullscreenPlayer,
 	addToQueue,
 	insertNext,
-	getQueue
+	getQueue,
+	loadPlaybackState
 };
 
-// Volume slider - click and drag support
+// Function to reload user-specific data after login
+function reloadUserData() {
+	// Load volume
+	loadSavedVolume();
+	audio.volume = currentVolume;
+	if (volumeFill) {
+		const sliderPos = volumeToSlider(currentVolume);
+		volumeFill.style.width = `${sliderPos * 100}%`;
+	}
+	
+	// Load playback state
+	const restored = loadPlaybackState();
+	if (restored) {
+		console.log('Playback state restored');
+	}
+}
+
+// Expose to window for renderer to call after login
+window.player = window.player || {};
+window.player.reloadUserData = reloadUserData;
+
+// Try to restore playback state on load (will work if user is already logged in)
+setTimeout(() => {
+	const restored = loadPlaybackState();
+	if (restored) {
+		console.log('Playback state restored');
+	}
+}, 500); // Small delay to ensure UI is ready
+
+// Volume slider - click and drag support with logarithmic scaling
 let currentVolume = 0.8; // Default volume
 let isVolumeDragging = false;
 
-function updateVolume(e) {
-    const rect = volumeSlider.getBoundingClientRect();
-    const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    currentVolume = pct;
-    audio.volume = pct;
-    if (volumeFill) {
-        volumeFill.style.width = `${pct * 100}%`;
+// Load saved volume - account specific
+function loadSavedVolume() {
+    const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+    if (!userId) return;
+    
+    const saved = localStorage.getItem(`playerVolume_${userId}`);
+    if (saved !== null) {
+        const volume = parseFloat(saved);
+        if (!isNaN(volume) && volume >= 0 && volume <= 1) {
+            currentVolume = volume;
+        }
     }
 }
 
+// Save volume to localStorage - account specific
+function saveVolume(volume) {
+    const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+    if (!userId) return;
+    localStorage.setItem(`playerVolume_${userId}`, volume.toString());
+}
+
+// Convert linear slider position to logarithmic volume
+function sliderToVolume(sliderValue) {
+    // Use exponential curve for more natural volume control
+    // This gives finer control at lower volumes
+    return Math.pow(sliderValue, 2);
+}
+
+// Convert logarithmic volume to linear slider position
+function volumeToSlider(volume) {
+    return Math.sqrt(volume);
+}
+
+function updateVolume(e) {
+    const rect = volumeSlider.getBoundingClientRect();
+    const sliderPos = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const volume = sliderToVolume(sliderPos);
+    
+    currentVolume = volume;
+    audio.volume = volume;
+    
+    if (volumeFill) {
+        volumeFill.style.width = `${sliderPos * 100}%`;
+    }
+    
+    // Save volume
+    saveVolume(volume);
+}
+
 if (volumeSlider) {
-    // Set initial volume
+    // Load and set initial volume
+    loadSavedVolume();
     audio.volume = currentVolume;
     if (volumeFill) {
-        volumeFill.style.width = `${currentVolume * 100}%`;
+        const sliderPos = volumeToSlider(currentVolume);
+        volumeFill.style.width = `${sliderPos * 100}%`;
     }
     
     volumeSlider.addEventListener('mousedown', (e) => {
@@ -1062,6 +1240,7 @@ if (clearQueueBtn) {
                 currentIndex = -1;
             }
             updateQueueDisplay();
+            savePlaybackState();
         }
     });
 }
@@ -1191,6 +1370,7 @@ function removeFromQueue(index) {
     }
     
     updateQueueDisplay();
+    savePlaybackState();
 }
 
 function addToRecentlyPlayed(track) {
@@ -1449,10 +1629,11 @@ function reorderQueue(fromIndex, toIndex, position) {
     // Update current index
     currentIndex = newCurrentIndex;
     
-    // Update the display with a slight delay for smooth transition
-    requestAnimationFrame(() => {
-        updateQueueDisplay();
-    });
+	// Update the display with a slight delay for smooth transition
+	requestAnimationFrame(() => {
+		updateQueueDisplay();
+		savePlaybackState();
+	});
 }
 
 

@@ -1,8 +1,8 @@
-# Jellify Electron
+# Jellify 
 
 A beautiful, modern desktop music player for Jellyfin servers built with Electron. Jellify provides a sleek, Spotify-like interface for your self-hosted music library with rich features including playlist management, search, lyrics support, and more.
 
-![Jellify Electron](Screenshots/home.png)
+![Jellify](Screenshots/home.png)
 
 ## ✨ Features
 
@@ -98,8 +98,8 @@ Comprehensive settings for audio quality, playback options, equalizer, and accou
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/jellify-electron.git
-   cd jellify-electron
+   git clone https://github.com/nessli420/jellify.git
+   cd jellify
    ```
 
 2. **Install dependencies**
@@ -114,18 +114,31 @@ Comprehensive settings for audio quality, playback options, equalizer, and accou
 
 ### Building for Distribution
 
-Create a distributable Windows executable:
+#### Portable Executable (Recommended)
+
+Create a single, standalone portable executable that can run from anywhere:
+
+```bash
+npx electron-builder --win portable
+```
+
+This will generate a portable executable: **`dist/Jellify 1.0.0.exe`**
+
+**Benefits:**
+- **Single file** - No installation required, runs from anywhere
+- **No dependencies** - All files self-extract to a temporary location at runtime
+- **~78 MB** - Complete app bundled in one executable
+- **Custom icon** - Automatically embeds `icon.ico` from the project root
+
+#### Development Build
+
+For testing, create an unpacked directory build:
 
 ```bash
 npm run package
 ```
 
-This will generate a standalone application in the `dist/Jellify-win32-x64/` folder containing:
-- `Jellify.exe` - The main executable with your custom icon
-- All required dependencies and runtime files
-- Your app's source code and resources
-
-**Output Location:** `dist/Jellify-win32-x64/`
+This generates a folder-based build in `dist/Jellify-win32-x64/` with all files visible. The `Jellify.exe` in this folder **requires all supporting files** (like `icudtl.dat`, `locales/`, `resources/`) to be in the same directory.
 
 #### Custom Icon
 
@@ -133,7 +146,7 @@ To use your own icon:
 
 1. Create or convert an icon to `.ico` format (recommended sizes: 16x16 to 256x256)
 2. Save it as `icon.ico` in the project root
-3. Run `npm run package` - the icon will automatically be embedded
+3. Run the build command - the icon will automatically be embedded
 
 **Online Icon Converters:**
 - https://convertio.co/png-ico/
@@ -143,18 +156,15 @@ To use your own icon:
 
 To share your built app:
 
-1. **Compress the folder:**
-   ```bash
-   Compress-Archive -Path "dist\Jellify-win32-x64" -DestinationPath "Jellify-Windows-x64.zip"
-   ```
+1. **Upload the portable executable** (`Jellify 1.0.0.exe`) directly to:
+   - GitHub Releases (recommended)
+   - Google Drive, Dropbox, or any file hosting service
 
-2. **Upload to GitHub Releases** (recommended for larger files)
-   - Go to your repository → Releases → Create a new release
-   - Upload the `.zip` file as a release asset
+2. **For GitHub Releases:**
+   - Go to https://github.com/nessli420/jellify → Releases → Create a new release
+   - Upload `dist/Jellify 1.0.0.exe` as a release asset
 
-3. **Alternative hosting:** Google Drive, Dropbox, or any file hosting service
-
-**Note:** The app is not code-signed, so Windows SmartScreen may show a warning on first run. This is normal for unsigned applications.
+**Note:** The app is not code-signed, so Windows SmartScreen may show a warning on first run ("Windows protected your PC"). Users need to click "More info" → "Run anyway". This is normal for unsigned applications.
 
 ## 🎮 Usage
 
@@ -240,9 +250,11 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 ## 📮 Support
 
 If you encounter any issues or have questions:
-- Check the [Issues](https://github.com/yourusername/jellify-electron/issues) page
+- Check the [Issues](https://github.com/nessli420/jellify/issues) page
 - Create a new issue with details about your problem
 - Include your Jellyfin server version and OS information
+
+**GitHub Repository:** https://github.com/nessli420/jellify
 
 
 

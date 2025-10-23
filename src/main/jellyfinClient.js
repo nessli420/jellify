@@ -7,8 +7,8 @@ class JellyfinClient {
 		this.userId = '';
 		this.token = '';
 		this.deviceId = this.generateDeviceId();
-		this.clientName = 'JellifyElectron';
-		this.version = '0.1.0';
+		this.clientName = 'Jellify';
+		this.version = '1.0.0';
 	}
 
 	generateDeviceId() {
@@ -161,7 +161,8 @@ class JellyfinClient {
 			Recursive: 'true',
 			SortBy: 'SortName',
 			StartIndex: String(startIndex),
-			Limit: String(limit)
+			Limit: String(limit),
+			Fields: 'UserData'
 		});
 		return { items: data?.Items || [], total: data?.TotalRecordCount || 0 };
 	}
@@ -198,7 +199,33 @@ class JellyfinClient {
 
 	async getItem(itemId) {
 		if (!itemId) throw new Error('itemId required');
-		const data = await this.apiGet(`/Items/${itemId}`);
+		const data = await this.apiGet(`/Items/${itemId}`, { Fields: 'UserData,OwnerUserId' });
+		
+		// If it's a playlist, try to fetch the owner's name and image
+		if (data.Type === 'Playlist') {
+			const ownerId = data.OwnerUserId || data.UserId;
+			if (ownerId) {
+				try {
+					const user = await this.apiGet(`/Users/${ownerId}`);
+					data.OwnerUserId = ownerId; // Ensure OwnerUserId is set
+					data.OwnerName = user.Name || '';
+					data.OwnerImage = this.getImageUrl(user, 'Primary', 40);
+				} catch (err) {
+					console.error('Failed to fetch playlist owner:', err);
+				}
+			} else {
+				// If no owner ID, assume it's the current user
+				try {
+					const user = await this.apiGet(`/Users/${this.userId}`);
+					data.OwnerUserId = this.userId; // Set current user as owner
+					data.OwnerName = user.Name || '';
+					data.OwnerImage = this.getImageUrl(user, 'Primary', 40);
+				} catch (err) {
+					console.error('Failed to fetch current user:', err);
+				}
+			}
+		}
+		
 		return data;
 	}
 
@@ -531,30 +558,81 @@ class JellyfinClient {
 	async getLibrary({ type = 'all', sortBy = 'SortName', limit = 200 } = {}) {
 		this.assertLoggedIn();
 		
-		const params = {
+		// Use existing working methods instead of a single API call
+		let items = [];
+		
+		if (type === 'all') {
+		// Fetch all types using existing methods
+		const [albums, artists, playlists] = await Promise.all([
+			this.apiGet(`/Users/${this.userId}/Items`, {
+				IncludeItemTypes: 'MusicAlbum',
+				Recursive: 'true',
+				SortBy: sortBy,
+				Limit: String(limit),
+				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
+			}),
+			this.apiGet(`/Users/${this.userId}/Items`, {
+				IncludeItemTypes: 'MusicArtist',
+				Recursive: 'true',
+				SortBy: sortBy,
+				Limit: String(limit),
+				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
+			}),
+			this.apiGet(`/Items`, {
+			IncludeItemTypes: 'Playlist',
 			Recursive: 'true',
 			SortBy: sortBy,
-			SortOrder: 'Ascending',
 			Limit: String(limit),
-			Fields: 'PrimaryImageAspectRatio,Genres'
-		};
-		
-		// Set item types based on filter
-		if (type === 'albums') {
-			params.IncludeItemTypes = 'MusicAlbum';
+			Fields: 'PrimaryImageAspectRatio,Genres,UserData,Path',
+			UserId: this.userId
+			})
+		]);
+			items = [
+				...(albums?.Items || []),
+				...(artists?.Items || []),
+				...(playlists?.Items || [])
+			];
+		} else if (type === 'albums') {
+			const data = await this.apiGet(`/Users/${this.userId}/Items`, {
+				IncludeItemTypes: 'MusicAlbum',
+				Recursive: 'true',
+				SortBy: sortBy,
+				Limit: String(limit),
+				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
+			});
+			items = data?.Items || [];
 		} else if (type === 'artists') {
-			params.IncludeItemTypes = 'MusicArtist';
-		} else if (type === 'playlists') {
-			params.IncludeItemTypes = 'Playlist';
+			const data = await this.apiGet(`/Users/${this.userId}/Items`, {
+				IncludeItemTypes: 'MusicArtist',
+				Recursive: 'true',
+				SortBy: sortBy,
+				Limit: String(limit),
+				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
+			});
+			items = data?.Items || [];
+	} else if (type === 'playlists') {
+		const data = await this.apiGet(`/Items`, {
+			IncludeItemTypes: 'Playlist',
+			Recursive: 'true',
+			SortBy: sortBy,
+			Limit: String(limit),
+			Fields: 'PrimaryImageAspectRatio,Genres,UserData',
+			UserId: this.userId
+		});
+		items = data?.Items || [];
 		} else if (type === 'songs') {
-			params.IncludeItemTypes = 'Audio';
-		} else {
-			// All types
-			params.IncludeItemTypes = 'MusicAlbum,MusicArtist,Playlist,Audio';
+			const data = await this.apiGet(`/Users/${this.userId}/Items`, {
+				IncludeItemTypes: 'Audio',
+				Recursive: 'true',
+				SortBy: sortBy,
+				Limit: String(limit),
+				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
+			});
+			items = data?.Items || [];
 		}
 		
-		const data = await this.apiGet(`/Users/${this.userId}/Items`, params);
-		return data?.Items || [];
+		console.log(`getLibrary(type="${type}") returned ${items.length} items`);
+		return items;
 	}
 
 	async getGenres() {
@@ -574,6 +652,12 @@ class JellyfinClient {
 		
 		const data = await this.apiGet(`/Users/${this.userId}`);
 		return data || {};
+	}
+
+	async getAllUsers() {
+		this.assertLoggedIn();
+		const data = await this.apiGet('/Users');
+		return data || [];
 	}
 
 	async getRecentlyPlayed({ limit = 20 } = {}) {

@@ -27,6 +27,7 @@
     },
     "files": [
       "src/**/*",
+      "icon.ico",
       "package.json"
     ],
     "win": {
@@ -36,14 +37,18 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64"
-          ]
         }
-      ]
-    }
+      ],
+      "icon": "icon.ico"
+    },
+    "portable": {
+      "artifactName": "Jellify-Portable.exe"
+    },
+    "extraResources": [
+      {
+        "from": "icon.ico",
+        "to": "icon.ico"
+      }
+    ]
   }
 }

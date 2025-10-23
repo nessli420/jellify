@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('api', {
 	getGenres: () => ipcRenderer.invoke('jellyfin:getGenres'),
 	getUserProfile: () => ipcRenderer.invoke('jellyfin:getUserProfile'),
 	getUserById: (userId) => ipcRenderer.invoke('jellyfin:getUserById', userId),
+	getUser: (userId) => ipcRenderer.invoke('jellyfin:getUser', userId),
+	getAllUsers: () => ipcRenderer.invoke('jellyfin:getAllUsers'),
 	getUserRecentlyPlayed: (userId, options) => ipcRenderer.invoke('jellyfin:getUserRecentlyPlayed', userId, options),
 	getRecentlyPlayed: (options) => ipcRenderer.invoke('jellyfin:getRecentlyPlayed', options),
 	getPlaybackInfo: () => ipcRenderer.invoke('jellyfin:getPlaybackInfo'),

@@ -119,7 +119,13 @@ ipcMain.handle('jellyfin:list:albums', async (_e, { startIndex = 0, limit = 60 }
 ipcMain.handle('jellyfin:list:playlists', async (_e, { startIndex = 0, limit = 60 } = {}) => {
 	try {
 		const { items, total } = await jellyfin.getPlaylistsPaged({ startIndex, limit });
-		const playlists = items.map((it) => ({ id: it.Id, title: it.Name, subtitle: '', image: jellyfin.getImageUrl(it) }));
+		const playlists = items.map((it) => ({ 
+			id: it.Id, 
+			title: it.Name, 
+			subtitle: '', 
+			image: jellyfin.getImageUrl(it),
+			isFavorite: it.UserData ? it.UserData.IsFavorite : false
+		}));
 		return { ok: true, items: playlists, total };
 	} catch (err) {
 		return { ok: false, error: err && err.message ? err.message : String(err) };
@@ -337,13 +343,15 @@ ipcMain.handle('jellyfin:getLibrary', async (_e, options) => {
 		
 		items.forEach((it) => {
 			if (it.Type === 'MusicAlbum') {
+				const isFav = it.UserData ? it.UserData.IsFavorite : false;
 				albums.push({
 					id: it.Id,
 					title: it.Name,
 					subtitle: (it.AlbumArtist || ''),
 					image: jellyfin.getImageUrl(it),
 					type: 'album',
-					genres: it.Genres || []
+					genres: it.Genres || [],
+					isFavorite: isFav
 				});
 			} else if (it.Type === 'MusicArtist') {
 				artists.push({
@@ -354,16 +362,19 @@ ipcMain.handle('jellyfin:getLibrary', async (_e, options) => {
 					type: 'artist',
 					genres: it.Genres || []
 				});
-			} else if (it.Type === 'Playlist') {
-				playlists.push({
-					id: it.Id,
-					title: it.Name,
-					subtitle: '',
-					image: jellyfin.getImageUrl(it),
-					type: 'playlist',
-					genres: []
-				});
-			} else if (it.Type === 'Audio') {
+		} else if (it.Type === 'Playlist') {
+			const isFav = it.UserData ? it.UserData.IsFavorite : false;
+			playlists.push({
+				id: it.Id,
+				title: it.Name,
+				subtitle: '',
+				image: jellyfin.getImageUrl(it),
+				type: 'playlist',
+				genres: [],
+				isFavorite: isFav,
+				ownerId: null // Will be fetched separately
+			});
+		} else if (it.Type === 'Audio') {
 				songs.push({
 					id: it.Id,
 					title: it.Name,
@@ -378,6 +389,34 @@ ipcMain.handle('jellyfin:getLibrary', async (_e, options) => {
 				});
 			}
 		});
+		
+		// Fetch owner information for each playlist
+		for (const playlist of playlists) {
+			try {
+				const detailedItem = await jellyfin.getItem(playlist.id);
+				console.log(`getItem for playlist "${playlist.title}":`, JSON.stringify({
+					Type: detailedItem.Type,
+					UserId: detailedItem.UserId,
+					OwnerUserId: detailedItem.OwnerUserId,
+					OwnerName: detailedItem.OwnerName
+				}));
+				if (detailedItem.Type === 'Playlist') {
+					const ownerId = detailedItem.OwnerUserId || detailedItem.UserId;
+					if (ownerId) {
+						playlist.ownerId = ownerId;
+						console.log(`✓ Playlist "${playlist.title}" owned by: ${ownerId}`);
+					} else {
+						console.log(`✗ No owner ID found for playlist "${playlist.title}"`);
+					}
+				}
+			} catch (err) {
+				console.error(`Failed to fetch owner for playlist ${playlist.title}:`, err);
+			}
+		}
+		
+		console.log('Final playlist owner IDs:', playlists.map(p => ({ title: p.title, ownerId: p.ownerId })));
+		
+		console.log(`getLibrary response: ${albums.length} albums (${albums.filter(a => a.isFavorite).length} favorited), ${playlists.length} playlists (${playlists.filter(p => p.isFavorite).length} favorited)`);
 		
 		return { ok: true, albums, artists, playlists, songs };
 	} catch (err) {
@@ -424,6 +463,25 @@ ipcMain.handle('jellyfin:getUserProfile', async () => {
 				}
 			}
 		};
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:getUser', async (_e, userId) => {
+	try {
+		const user = await jellyfin.apiGet(`/Users/${userId}`);
+		return { ok: true, user: { id: user.Id, name: user.Name } };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:getAllUsers', async () => {
+	try {
+		const users = await jellyfin.getAllUsers();
+		const formatted = users.map(u => ({ id: u.Id, name: u.Name }));
+		return { ok: true, users: formatted };
 	} catch (err) {
 		return { ok: false, error: err && err.message ? err.message : String(err) };
 	}
