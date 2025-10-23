@@ -220,7 +220,31 @@ startStateSaving();
 function updateUiForTrack(track) {
 	titleEl.textContent = track ? track.title : 'Not Playing';
 	artistEl.textContent = track ? track.artist : '';
-	if (track && track.image) artEl.src = track.image; else artEl.removeAttribute('src');
+	
+	// Handle album art with placeholder
+	if (track && track.image) {
+		artEl.src = track.image;
+		artEl.style.display = 'block';
+	} else {
+		// Use placeholder
+		artEl.src = '';
+		artEl.style.display = 'none';
+		// Create placeholder if it doesn't exist
+		let placeholder = artEl.parentElement.querySelector('.track-art-placeholder-player');
+		if (!placeholder) {
+			placeholder = document.createElement('div');
+			placeholder.className = 'track-art-placeholder-player';
+			placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+			artEl.parentElement.insertBefore(placeholder, artEl);
+		}
+		placeholder.style.display = 'flex';
+	}
+	
+	// Show album art if it exists
+	if (track && track.image) {
+		const placeholder = artEl.parentElement.querySelector('.track-art-placeholder-player');
+		if (placeholder) placeholder.style.display = 'none';
+	}
 	
 	// Show/hide mediabar based on whether there's a track
 	const layout = document.getElementById('layout');
@@ -670,7 +694,27 @@ function updateFullscreenUI() {
 	const track = queue[currentIndex];
 	
 	if (track) {
-		if (fullscreenArt) fullscreenArt.src = track.image || '';
+		// Handle album art with placeholder for fullscreen
+		if (track.image && fullscreenArt) {
+			fullscreenArt.src = track.image;
+			fullscreenArt.style.display = 'block';
+			// Hide placeholder if exists
+			const placeholder = fullscreenArt.parentElement.querySelector('.fullscreen-art-placeholder');
+			if (placeholder) placeholder.style.display = 'none';
+		} else if (fullscreenArt) {
+			fullscreenArt.src = '';
+			fullscreenArt.style.display = 'none';
+			// Create placeholder if it doesn't exist
+			let placeholder = fullscreenArt.parentElement.querySelector('.fullscreen-art-placeholder');
+			if (!placeholder) {
+				placeholder = document.createElement('div');
+				placeholder.className = 'fullscreen-art-placeholder';
+				placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+				fullscreenArt.parentElement.insertBefore(placeholder, fullscreenArt);
+			}
+			placeholder.style.display = 'flex';
+		}
+		
 		if (fullscreenTitle) fullscreenTitle.textContent = track.title;
 		if (fullscreenArtist) fullscreenArtist.textContent = track.artist;
 		if (fullscreenAlbum) fullscreenAlbum.textContent = track.album || '';
@@ -1267,11 +1311,20 @@ function createQueueItemElement(track, index, isNowPlaying = false) {
     drag.className = 'queue-item-drag';
     drag.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
     
-    // Album art
-    const art = document.createElement('img');
-    art.className = 'queue-item-art';
-    art.src = track.image || '';
-    art.alt = track.title;
+    // Album art with placeholder
+    let artContainer;
+    if (track.image) {
+        const art = document.createElement('img');
+        art.className = 'queue-item-art';
+        art.src = track.image;
+        art.alt = track.title;
+        artContainer = art;
+    } else {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'queue-item-art-placeholder';
+        placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+        artContainer = placeholder;
+    }
     
     // Track info
     const info = document.createElement('div');
@@ -1314,7 +1367,7 @@ function createQueueItemElement(track, index, isNowPlaying = false) {
     });
     
     item.appendChild(drag);
-    item.appendChild(art);
+    item.appendChild(artContainer);
     item.appendChild(info);
     item.appendChild(duration);
     item.appendChild(playBtn);

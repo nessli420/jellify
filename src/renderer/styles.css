@@ -1268,6 +1268,58 @@ body {
     height: 24px;
     color: rgba(255, 255, 255, 0.3);
 }
+
+/* Media player placeholder */
+.track-art-placeholder-player {
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.track-art-placeholder-player svg {
+    width: 32px;
+    height: 32px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+/* Fullscreen player placeholder */
+.fullscreen-art-placeholder {
+    width: 100%;
+    max-width: 500px;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+.fullscreen-art-placeholder svg {
+    width: 120px;
+    height: 120px;
+    color: rgba(255, 255, 255, 0.2);
+}
+
+/* Queue item placeholder */
+.queue-item-art-placeholder {
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.queue-item-art-placeholder svg {
+    width: 28px;
+    height: 28px;
+    color: rgba(255, 255, 255, 0.3);
+}
 .tracks .track-info-cell {
     display: flex;
     align-items: center;
