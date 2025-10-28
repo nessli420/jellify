@@ -434,6 +434,19 @@ class PlaylistContextMenu {
         menu.id = 'playlist-context-menu';
         menu.className = 'playlist-context-menu';
         menu.innerHTML = `
+            <div class="context-menu-item" id="ctx-playlist-add-to-queue">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/>
+                </svg>
+                <span>Add to queue</span>
+            </div>
+            <div class="context-menu-item" id="ctx-playlist-play-next">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                </svg>
+                <span>Play next</span>
+            </div>
+            <div class="context-menu-separator"></div>
             <div class="context-menu-item" id="ctx-playlist-favorite">
                 <svg class="context-menu-icon ctx-favorite-icon" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/>
@@ -445,6 +458,13 @@ class PlaylistContextMenu {
                     <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
                 </svg>
                 <span class="ctx-pin-text">Pin playlist</span>
+            </div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" id="ctx-playlist-manage">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/>
+                </svg>
+                <span>Manage playlist</span>
             </div>
             <div class="context-menu-item" id="ctx-playlist-open">
                 <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
@@ -462,6 +482,20 @@ class PlaylistContextMenu {
     }
 
 	setupEventListeners() {
+		// Add to queue
+		document.getElementById('ctx-playlist-add-to-queue').addEventListener('click', async (e) => {
+			e.stopPropagation();
+			await this.addToQueue();
+			this.hide();
+		});
+		
+		// Play next
+		document.getElementById('ctx-playlist-play-next').addEventListener('click', async (e) => {
+			e.stopPropagation();
+			await this.playNext();
+			this.hide();
+		});
+		
 		// Favorite/Unfavorite playlist
 		document.getElementById('ctx-playlist-favorite').addEventListener('click', async (e) => {
 			e.stopPropagation();
@@ -473,6 +507,13 @@ class PlaylistContextMenu {
 		document.getElementById('ctx-playlist-pin').addEventListener('click', async (e) => {
 			e.stopPropagation();
 			await this.togglePin();
+			this.hide();
+		});
+		
+		// Manage playlist
+		document.getElementById('ctx-playlist-manage').addEventListener('click', async (e) => {
+			e.stopPropagation();
+			this.managePlaylist();
 			this.hide();
 		});
 		
@@ -555,6 +596,62 @@ class PlaylistContextMenu {
             this.menu.style.display = 'none';
         }
     }
+
+	async addToQueue() {
+		if (!this.currentPlaylist || !window.player) return;
+		
+		try {
+			// Fetch playlist tracks
+			const res = await window.api.getPlaylistTracks(this.currentPlaylist.id);
+			if (res.ok && res.tracks) {
+				// Add all tracks to queue
+				res.tracks.forEach(track => {
+					window.player.addToQueue(track);
+				});
+				
+				if (window.showToast) {
+					window.showToast(`Added ${res.tracks.length} songs to queue`, 'success');
+				}
+			}
+		} catch (error) {
+			console.error('Error adding playlist to queue:', error);
+			if (window.showToast) {
+				window.showToast('Failed to add to queue', 'error');
+			}
+		}
+	}
+	
+	async playNext() {
+		if (!this.currentPlaylist || !window.player) return;
+		
+		try {
+			// Fetch playlist tracks
+			const res = await window.api.getPlaylistTracks(this.currentPlaylist.id);
+			if (res.ok && res.tracks) {
+				// Insert tracks after current track (in reverse order so they play in correct order)
+				for (let i = res.tracks.length - 1; i >= 0; i--) {
+					window.player.insertNext(res.tracks[i]);
+				}
+				
+				if (window.showToast) {
+					window.showToast(`${res.tracks.length} songs will play next`, 'success');
+				}
+			}
+		} catch (error) {
+			console.error('Error adding playlist to play next:', error);
+			if (window.showToast) {
+				window.showToast('Failed to add to play next', 'error');
+			}
+		}
+	}
+	
+	managePlaylist() {
+		if (!this.currentPlaylist) return;
+		// Open playlist management modal
+		if (window.showPlaylistManagementModal) {
+			window.showPlaylistManagementModal(this.currentPlaylist);
+		}
+	}
 
 	async togglePin() {
 		if (!this.currentPlaylist) return;
@@ -678,12 +775,26 @@ class AlbumContextMenu {
         menu.id = 'album-context-menu';
         menu.className = 'album-context-menu';
         menu.innerHTML = `
+            <div class="context-menu-item" id="ctx-album-add-to-queue">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/>
+                </svg>
+                <span>Add to queue</span>
+            </div>
+            <div class="context-menu-item" id="ctx-album-play-next">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                </svg>
+                <span>Play next</span>
+            </div>
+            <div class="context-menu-separator"></div>
             <div class="context-menu-item" id="ctx-album-favorite">
                 <svg class="context-menu-icon ctx-favorite-icon" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/>
                 </svg>
                 <span class="ctx-favorite-text">Add to favourites</span>
             </div>
+            <div class="context-menu-separator"></div>
             <div class="context-menu-item" id="ctx-album-open">
                 <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
@@ -699,6 +810,18 @@ class AlbumContextMenu {
     }
 
     setupEventListeners() {
+        document.getElementById('ctx-album-add-to-queue').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.addToQueue();
+            this.hide();
+        });
+        
+        document.getElementById('ctx-album-play-next').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.playNext();
+            this.hide();
+        });
+        
         document.getElementById('ctx-album-favorite').addEventListener('click', async (e) => {
             e.stopPropagation();
             await this.toggleFavorite();
@@ -759,6 +882,54 @@ class AlbumContextMenu {
     hide() {
         if (this.menu) {
             this.menu.style.display = 'none';
+        }
+    }
+
+    async addToQueue() {
+        if (!this.currentAlbum || !window.player) return;
+        
+        try {
+            // Fetch album tracks
+            const res = await window.api.getAlbumTracks(this.currentAlbum.id);
+            if (res.ok && res.tracks) {
+                // Add all tracks to queue
+                res.tracks.forEach(track => {
+                    window.player.addToQueue(track);
+                });
+                
+                if (window.showToast) {
+                    window.showToast(`Added ${res.tracks.length} songs to queue`, 'success');
+                }
+            }
+        } catch (error) {
+            console.error('Error adding album to queue:', error);
+            if (window.showToast) {
+                window.showToast('Failed to add to queue', 'error');
+            }
+        }
+    }
+    
+    async playNext() {
+        if (!this.currentAlbum || !window.player) return;
+        
+        try {
+            // Fetch album tracks
+            const res = await window.api.getAlbumTracks(this.currentAlbum.id);
+            if (res.ok && res.tracks) {
+                // Insert tracks after current track (in reverse order so they play in correct order)
+                for (let i = res.tracks.length - 1; i >= 0; i--) {
+                    window.player.insertNext(res.tracks[i]);
+                }
+                
+                if (window.showToast) {
+                    window.showToast(`${res.tracks.length} songs will play next`, 'success');
+                }
+            }
+        } catch (error) {
+            console.error('Error adding album to play next:', error);
+            if (window.showToast) {
+                window.showToast('Failed to add to play next', 'error');
+            }
         }
     }
 

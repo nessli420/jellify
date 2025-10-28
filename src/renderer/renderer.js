@@ -120,6 +120,22 @@ function el(tag, attrs = {}, children = []) {
 	return node;
 }
 
+// Helper function for creating SVG elements
+function svgEl(tag, attrs = {}, children = []) {
+	const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+	Object.entries(attrs).forEach(([k, v]) => {
+		node.setAttribute(k, v);
+	});
+	(children || []).forEach((c) => {
+		if (typeof c === 'string') {
+			node.appendChild(document.createTextNode(c));
+		} else {
+			node.appendChild(c);
+		}
+	});
+	return node;
+}
+
 function showLoginError(message) {
 	// Find or create error message element
 	let errorEl = document.getElementById('login-error-message');
@@ -547,7 +563,15 @@ function tracksList(title, tracks, onSelect, playlistId = null, isAlbumView = fa
 			
 		const numberCell = el('td', { class: 'track-number' });
 		if (isPlaying) {
-			numberCell.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" class="playing-icon"><path d="M8 5v14l11-7z"/></svg>';
+			// Show animated equalizer for currently playing track
+			numberCell.innerHTML = `
+				<div class="equalizer">
+					<span class="bar"></span>
+					<span class="bar"></span>
+					<span class="bar"></span>
+					<span class="bar"></span>
+				</div>
+			`;
 			numberCell.classList.add('playing');
 		} else {
 			numberCell.textContent = String(idx + 1);
@@ -923,6 +947,25 @@ async function renderPlaylistDetail(id) {
 		}
 	});
 	
+	// Create manage playlist button
+	const manageBtn = el('button', { class: 'btn-manage-hero' }, []);
+	const manageSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	manageSvg.setAttribute('viewBox', '0 0 24 24');
+	manageSvg.setAttribute('fill', 'currentColor');
+	const managePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	managePath.setAttribute('d', 'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z');
+	manageSvg.appendChild(managePath);
+	manageBtn.appendChild(manageSvg);
+	manageBtn.addEventListener('click', () => {
+		if (window.showPlaylistManagementModal) {
+			window.showPlaylistManagementModal({
+				id: item.Id,
+				title: item.Name,
+				image: item.image
+			});
+		}
+	});
+	
 	const metaInfoParts = [];
 	
 	// Show playlist creator with profile picture
@@ -958,7 +1001,7 @@ async function renderPlaylistDetail(id) {
 		el('div', { class: 'type' }, ['PLAYLIST']),
 		el('div', { class: 'title' }, [item.Name || 'Playlist']),
 		metaInfoParts.length > 0 ? el('div', { class: 'meta-info' }, metaInfoParts) : null,
-		el('div', { class: 'hero-actions' }, [playAllBtn, shuffleBtn, favoriteBtn, pinBtn])
+		el('div', { class: 'hero-actions' }, [playAllBtn, shuffleBtn, favoriteBtn, pinBtn, manageBtn])
 	].filter(Boolean));
 	
 	hero.appendChild(heroImg);
@@ -1392,7 +1435,8 @@ async function renderLikedSongs() {
 		return app.replaceChildren(el('div', { class: 'container' }, [res.error || 'Failed to load liked songs']));
 	}
 	
-	const tracks = res.tracks;
+	// Reverse tracks so newest liked songs show first
+	const tracks = res.tracks.slice().reverse();
 	
 	const onSelect = (i) => { 
 		window.player.loadQueue(tracks); 
@@ -1431,11 +1475,14 @@ async function renderLikedSongs() {
 	const heartIcon = el('div', { class: 'liked-songs-icon' });
 	heartIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
 	
+	const allTracks = tracks;
+	let filteredTracks = allTracks;
+	
 	const heroMeta = el('div', { class: 'hero-meta' }, [
 		el('div', { class: 'type' }, ['PLAYLIST']),
 		el('div', { class: 'title' }, ['Liked Songs']),
 		el('div', { class: 'meta-info' }, [
-			el('span', {}, [`${tracks.length} songs`])
+			el('span', {}, [`${allTracks.length} songs`])
 		]),
 		el('div', { class: 'hero-actions' }, [playAllBtn, shuffleBtn])
 	]);
@@ -1443,7 +1490,31 @@ async function renderLikedSongs() {
 	hero.appendChild(heartIcon);
 	hero.appendChild(heroMeta);
 	
-	app.replaceChildren(el('div', {}, [hero, tracksList('', tracks, onSelect)]));
+	// Search bar
+	const searchBar = el('div', { class: 'search-bar-container' });
+	const searchInput = el('input', { type: 'text', class: 'search-bar', placeholder: 'Search by title or artist...' });
+	const tracksContainer = el('div', {});
+	
+	function updateTracksDisplay() {
+		tracksContainer.replaceChildren(tracksList('', filteredTracks, (i) => {
+			window.player.loadQueue(filteredTracks);
+			window.player.playIndex(i);
+		}));
+	}
+	
+	searchInput.addEventListener('input', (e) => {
+		const query = e.target.value.toLowerCase();
+		filteredTracks = query ? allTracks.filter(t => 
+			(t.title || '').toLowerCase().includes(query) || 
+			(t.artist || '').toLowerCase().includes(query)
+		) : allTracks;
+		updateTracksDisplay();
+	});
+	
+	searchBar.appendChild(searchInput);
+	updateTracksDisplay();
+	
+	app.replaceChildren(el('div', {}, [hero, searchBar, tracksContainer]));
 }
 
 async function renderLibrary() {
@@ -1978,12 +2049,21 @@ async function renderProfile(userId = null) {
 					el('h2', { class: 'profile-section-title' }, ['Currently Playing'])
 				);
 				
-				nowPlayingCard = el('div', { class: 'now-playing-card' }, [
-					el('img', { 
+				// Create image or placeholder
+				let imageElement;
+				if (track.image) {
+					imageElement = el('img', { 
 						class: 'now-playing-image', 
-						src: track.image || '', 
+						src: track.image, 
 						alt: track.title 
-					}),
+					});
+				} else {
+					imageElement = el('div', { class: 'now-playing-image-placeholder' });
+					imageElement.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+				}
+				
+				nowPlayingCard = el('div', { class: 'now-playing-card' }, [
+					imageElement,
 					el('div', { class: 'now-playing-info' }, [
 						el('div', { class: 'now-playing-title' }, [track.title]),
 						el('div', { class: 'now-playing-artist' }, [track.artist]),
@@ -2000,12 +2080,30 @@ async function renderProfile(userId = null) {
 					contentWrapper.insertBefore(nowPlayingSection, contentWrapper.firstChild);
 				}
 			} else {
-				// Update existing card
-				const img = nowPlayingCard.querySelector('.now-playing-image');
+				// Update existing card - need to replace image/placeholder based on track
+				const existingImage = nowPlayingCard.querySelector('.now-playing-image');
+				const existingPlaceholder = nowPlayingCard.querySelector('.now-playing-image-placeholder');
 				const title = nowPlayingCard.querySelector('.now-playing-title');
 				const artist = nowPlayingCard.querySelector('.now-playing-artist');
 				
-				if (img) img.src = track.image || '';
+				// Remove existing image or placeholder
+				if (existingImage) existingImage.remove();
+				if (existingPlaceholder) existingPlaceholder.remove();
+				
+				// Add new image or placeholder
+				let imageElement;
+				if (track.image) {
+					imageElement = el('img', { 
+						class: 'now-playing-image', 
+						src: track.image, 
+						alt: track.title 
+					});
+				} else {
+					imageElement = el('div', { class: 'now-playing-image-placeholder' });
+					imageElement.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+				}
+				nowPlayingCard.insertBefore(imageElement, nowPlayingCard.firstChild);
+				
 				if (title) title.textContent = track.title;
 				if (artist) artist.textContent = track.artist;
 			}
@@ -2208,16 +2306,24 @@ function saveDiscordSettings(settings) {
 }
 
 async function renderSettings() {
-	const container = el('div', { class: 'settings-page' });
-	
-	// Get current settings from localStorage
-	const settings = getPlaybackSettings();
-	container.replaceChildren();
-	
-	// Header
-	const header = el('div', { class: 'settings-header' }, [
-		el('h1', {}, ['Settings']),
-		el('p', { class: 'settings-subtitle' }, ['Manage your playback and audio preferences. Settings are stored locally on this device.'])
+	try {
+		const container = el('div', { class: 'settings-page' });
+		
+		// Get current settings from localStorage
+		const settings = getPlaybackSettings();
+		container.replaceChildren();
+		
+		// Header
+		const header = el('div', { class: 'settings-header' }, [
+		el('div', { class: 'settings-header-icon' }, [
+			svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+				svgEl('path', { d: 'M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z' }, [])
+			])
+		]),
+		el('div', { class: 'settings-header-text' }, [
+			el('h1', {}, ['Settings']),
+			el('p', { class: 'settings-subtitle' }, ['Customize your music experience. All settings are saved locally on this device.'])
+		])
 	]);
 	
 	container.appendChild(header);
@@ -2227,7 +2333,17 @@ async function renderSettings() {
 	
 	// Audio Quality Section
 	const audioSection = el('div', { class: 'settings-section' }, [
-		el('h2', { class: 'settings-section-title' }, ['Audio Quality'])
+		el('div', { class: 'settings-section-header' }, [
+			el('div', { class: 'settings-section-icon' }, [
+				svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+					svgEl('path', { d: 'M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z' }, [])
+				])
+			]),
+			el('div', {}, [
+				el('h2', { class: 'settings-section-title' }, ['Audio Quality']),
+				el('p', { class: 'settings-section-desc' }, ['Configure streaming and playback quality'])
+			])
+		])
 	]);
 	
 	// Music Streaming Bitrate
@@ -2259,7 +2375,17 @@ async function renderSettings() {
 	
 	// Playback Options Section
 	const playbackSection = el('div', { class: 'settings-section' }, [
-		el('h2', { class: 'settings-section-title' }, ['Playback Options'])
+		el('div', { class: 'settings-section-header' }, [
+			el('div', { class: 'settings-section-icon' }, [
+				svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+					svgEl('path', { d: 'M8 5v14l11-7z' }, [])
+				])
+			]),
+			el('div', {}, [
+				el('h2', { class: 'settings-section-title' }, ['Playback Options']),
+				el('p', { class: 'settings-section-desc' }, ['Control how media is streamed and played'])
+			])
+		])
 	]);
 	
 	// Direct Play checkbox
@@ -2307,7 +2433,17 @@ async function renderSettings() {
 	
 	// Crossfade Section
 	const crossfadeSection = el('div', { class: 'settings-section' }, [
-		el('h2', { class: 'settings-section-title' }, ['Crossfade'])
+		el('div', { class: 'settings-section-header' }, [
+			el('div', { class: 'settings-section-icon' }, [
+				svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+					svgEl('path', { d: 'M7.58 16.89l5.77-4.07c.56-.4.56-1.24 0-1.63L7.58 7.11C6.91 6.65 6 7.12 6 7.93v8.14c0 .81.91 1.28 1.58.82zM16 7v10c0 .55.45 1 1 1s1-.45 1-1V7c0-.55-.45-1-1-1s-1 .45-1 1z' }, [])
+				])
+			]),
+			el('div', {}, [
+				el('h2', { class: 'settings-section-title' }, ['Crossfade']),
+				el('p', { class: 'settings-section-desc' }, ['Smoothly transition between tracks'])
+			])
+		])
 	]);
 	
 	const crossfadeOptions = [
@@ -2339,36 +2475,100 @@ async function renderSettings() {
 	contentWrapper.appendChild(crossfadeSection);
 	
 	// Equalizer Section
-	const eqSection = el('div', { class: 'settings-section' }, [
-		el('h2', { class: 'settings-section-title' }, ['Equalizer'])
+	const eqSection = el('div', { class: 'settings-section settings-section-eq' }, [
+		el('div', { class: 'settings-section-header' }, [
+			el('div', { class: 'settings-section-icon' }, [
+				svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+					svgEl('path', { d: 'M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z' }, [])
+				])
+			]),
+			el('div', {}, [
+				el('h2', { class: 'settings-section-title' }, ['Equalizer']),
+				el('p', { class: 'settings-section-desc' }, ['Fine-tune your audio with a 10-band equalizer'])
+			])
+		])
 	]);
 	
 	const eqEnabled = settings.equalizer && settings.equalizer.enabled;
 	const eqBands = settings.equalizer && settings.equalizer.bands ? settings.equalizer.bands : [0,0,0,0,0,0,0,0,0,0];
 	
+	// EQ Presets
+	const EQ_PRESETS = {
+		'Flat': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+		'Rock': [5, 4, 3, 1, -1, 1, 3, 4, 5, 5],
+		'Pop': [2, 4, 5, 3, 0, -1, -2, -2, 1, 2],
+		'Jazz': [4, 3, 1, 2, -1, -1, 0, 1, 3, 4],
+		'Classical': [4, 3, 2, 0, -1, -1, 0, 2, 3, 4],
+		'Bass Boost': [8, 6, 4, 2, 0, 0, 0, 0, 0, 0],
+		'Treble Boost': [0, 0, 0, 0, 0, 2, 4, 6, 8, 10],
+		'Vocal Boost': [-1, -2, -1, 1, 4, 4, 3, 1, 0, -1],
+		'Electronic': [5, 4, 1, 0, -2, 2, 1, 2, 4, 5],
+		'Acoustic': [4, 4, 3, 1, 2, 2, 3, 3, 3, 2]
+	};
+	
 	const eqEnableCheckbox = el('input', { type: 'checkbox', id: 'eq-enabled', class: 'settings-checkbox' });
 	eqEnableCheckbox.checked = eqEnabled;
 	
 	const eqEnableGroup = el('div', { class: 'settings-group' }, [
-		el('label', { class: 'settings-checkbox-label' }, [
-			eqEnableCheckbox,
-			el('span', {}, ['Enable Equalizer'])
-		]),
-		el('p', { class: 'settings-description' }, ['Adjust audio frequencies to customize your sound. Changes apply to all playback.'])
+		el('div', { class: 'eq-top-controls' }, [
+			el('label', { class: 'settings-checkbox-label' }, [
+				eqEnableCheckbox,
+				el('span', {}, ['Enable Equalizer'])
+			]),
+			el('p', { class: 'settings-description' }, ['Adjust audio frequencies to customize your sound. Changes apply instantly to playback.'])
+		])
 	]);
 	
 	eqSection.appendChild(eqEnableGroup);
+	
+	// Presets selector
+	const presetsContainer = el('div', { class: 'eq-presets-container' }, [
+		el('label', { class: 'eq-presets-label' }, ['Presets']),
+		el('div', { class: 'eq-presets-grid', id: 'eq-presets-grid' })
+	]);
+	
+	const presetsGrid = presetsContainer.querySelector('#eq-presets-grid');
+	Object.keys(EQ_PRESETS).forEach(presetName => {
+		const presetBtn = el('button', { class: 'eq-preset-btn', type: 'button' }, [presetName]);
+		presetBtn.addEventListener('click', () => {
+			// Apply preset
+			const presetValues = EQ_PRESETS[presetName];
+			eqSliders.forEach((slider, i) => {
+				slider.value = presetValues[i];
+				slider.nextElementSibling.textContent = `${presetValues[i]}dB`;
+			});
+			
+			// Update active state
+			presetsGrid.querySelectorAll('.eq-preset-btn').forEach(btn => btn.classList.remove('active'));
+			presetBtn.classList.add('active');
+			
+			// Apply in real-time if enabled
+			if (eqEnableCheckbox.checked && window.player) {
+				window.player.applyEqualizerSettings({ enabled: true, bands: presetValues });
+			}
+		});
+		presetsGrid.appendChild(presetBtn);
+	});
+	
+	eqSection.appendChild(presetsContainer);
 	
 	// EQ Bands (10-band)
 	const frequencies = ['32Hz', '64Hz', '125Hz', '250Hz', '500Hz', '1kHz', '2kHz', '4kHz', '8kHz', '16kHz'];
 	const eqSlidersContainer = el('div', { class: 'eq-sliders-container' });
 	const eqSliders = [];
 	
+	// Add zero line indicator
+	const zeroLineContainer = el('div', { class: 'eq-zero-line-container' }, [
+		el('div', { class: 'eq-zero-line' }),
+		el('span', { class: 'eq-zero-label' }, ['0 dB'])
+	]);
+	
 	frequencies.forEach((freq, i) => {
 		const slider = el('input', { 
 			type: 'range', 
 			min: '-12', 
 			max: '12', 
+			step: '1',
 			value: eqBands[i] || 0,
 			class: 'eq-slider',
 			id: `eq-slider-${i}`
@@ -2376,8 +2576,29 @@ async function renderSettings() {
 		
 		const valueDisplay = el('span', { class: 'eq-value' }, [`${eqBands[i] || 0}dB`]);
 		
+		// Visual bar for current value
+		const visualBar = el('div', { class: 'eq-visual-bar' });
+		const updateVisualBar = () => {
+			const value = parseFloat(slider.value);
+			const percentage = ((value + 12) / 24) * 100; // Map -12 to +12 => 0 to 100%
+			visualBar.style.height = `${percentage}%`;
+			
+			if (value > 0) {
+				visualBar.style.background = 'linear-gradient(to top, #1db954, #1ed760)';
+			} else if (value < 0) {
+				visualBar.style.background = 'linear-gradient(to top, #ef4444, #dc2626)';
+			} else {
+				visualBar.style.background = '#555';
+			}
+		};
+		updateVisualBar();
+		
 		slider.addEventListener('input', () => {
 			valueDisplay.textContent = `${slider.value}dB`;
+			updateVisualBar();
+			
+			// Clear preset selection when manually adjusting
+			presetsGrid.querySelectorAll('.eq-preset-btn').forEach(btn => btn.classList.remove('active'));
 			
 			// Apply in real-time if enabled
 			if (eqEnableCheckbox.checked && window.player) {
@@ -2389,13 +2610,18 @@ async function renderSettings() {
 		eqSliders.push(slider);
 		
 		const sliderGroup = el('div', { class: 'eq-slider-group' }, [
-			el('label', { class: 'eq-label' }, [freq]),
-			slider,
-			valueDisplay
+			valueDisplay,
+			el('div', { class: 'eq-slider-track' }, [
+				visualBar,
+				slider
+			]),
+			el('label', { class: 'eq-label' }, [freq])
 		]);
 		
 		eqSlidersContainer.appendChild(sliderGroup);
 	});
+	
+	eqSlidersContainer.prepend(zeroLineContainer);
 	
 	// EQ enable/disable toggle
 	eqEnableCheckbox.addEventListener('change', () => {
@@ -2421,24 +2647,48 @@ async function renderSettings() {
 	eqSlidersContainer.style.transition = 'opacity 0.3s';
 	
 	// Reset button
-	const resetEqBtn = el('button', { class: 'btn-secondary', style: 'margin-top: 16px;' }, ['Reset to Flat']);
+	const resetEqBtn = el('button', { class: 'btn-secondary eq-reset-btn', type: 'button' }, [
+		svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+			svgEl('path', { d: 'M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z' }, [])
+		]),
+		el('span', {}, ['Reset to Flat'])
+	]);
+	
 	resetEqBtn.addEventListener('click', () => {
 		eqSliders.forEach((slider, i) => {
 			slider.value = 0;
-			slider.nextElementSibling.textContent = '0dB';
+			const event = new Event('input', { bubbles: true });
+			slider.dispatchEvent(event);
 		});
+		
+		// Clear preset selection
+		presetsGrid.querySelectorAll('.eq-preset-btn').forEach(btn => btn.classList.remove('active'));
+		presetsGrid.querySelector('.eq-preset-btn').classList.add('active'); // Select "Flat"
+		
 		if (eqEnableCheckbox.checked && window.player) {
 			window.player.resetEqualizer();
 		}
 	});
 	
+	const eqActionsContainer = el('div', { class: 'eq-actions' }, [resetEqBtn]);
+	
 	eqSection.appendChild(eqSlidersContainer);
-	eqSection.appendChild(resetEqBtn);
+	eqSection.appendChild(eqActionsContainer);
 	contentWrapper.appendChild(eqSection);
 	
 	// Discord Rich Presence Section
 	const discordSection = el('div', { class: 'settings-section' }, [
-		el('h2', { class: 'settings-section-title' }, ['Discord Rich Presence'])
+		el('div', { class: 'settings-section-header' }, [
+			el('div', { class: 'settings-section-icon discord' }, [
+				svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+					svgEl('path', { d: 'M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.565 18.565 0 0 0-5.487 0 12.733 12.733 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026 13.83 13.83 0 0 0 1.226-1.963.074.074 0 0 0-.041-.104 13.201 13.201 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028zM8.02 15.278c-1.182 0-2.157-1.069-2.157-2.38 0-1.312.956-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.956 2.38-2.157 2.38zm7.975 0c-1.183 0-2.157-1.069-2.157-2.38 0-1.312.955-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.946 2.38-2.157 2.38z' }, [])
+				])
+			]),
+			el('div', {}, [
+				el('h2', { class: 'settings-section-title' }, ['Discord Rich Presence']),
+				el('p', { class: 'settings-section-desc' }, ['Display what you\'re listening to on Discord'])
+			])
+		])
 	]);
 	
 	// Get Discord settings
@@ -2515,8 +2765,18 @@ async function renderSettings() {
 	contentWrapper.appendChild(discordSection);
 	
 	// Account Section
-	const accountSection = el('div', { class: 'settings-section' }, [
-		el('h2', { class: 'settings-section-title' }, ['Account'])
+	const accountSection = el('div', { class: 'settings-section settings-section-danger' }, [
+		el('div', { class: 'settings-section-header' }, [
+			el('div', { class: 'settings-section-icon' }, [
+				svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+					svgEl('path', { d: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z' }, [])
+				])
+			]),
+			el('div', {}, [
+				el('h2', { class: 'settings-section-title' }, ['Account']),
+				el('p', { class: 'settings-section-desc' }, ['Manage your account preferences'])
+			])
+		])
 	]);
 	
 	// Get auto-login preference
@@ -2546,10 +2806,21 @@ async function renderSettings() {
 	contentWrapper.appendChild(accountSection);
 	
 	// Save button
-	const saveBtn = el('button', { class: 'btn-primary settings-save-btn' }, ['Save Settings']);
+	const saveBtn = el('button', { class: 'btn-primary settings-save-btn' }, [
+		svgEl('svg', { viewBox: '0 0 24 24', fill: 'currentColor' }, [
+			svgEl('path', { d: 'M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z' }, [])
+		]),
+		el('span', {}, ['Save All Settings'])
+	]);
 	saveBtn.addEventListener('click', async () => {
 		saveBtn.disabled = true;
-		saveBtn.textContent = 'Saving...';
+		saveBtn.innerHTML = `
+			<svg viewBox="0 0 24 24" fill="currentColor" style="animation: spin 0.8s linear infinite;">
+				<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" opacity=".3"/>
+				<path d="M12 2C6.48 2 2 6.48 2 12h2c0-4.41 3.59-8 8-8s8 3.59 8 8 3.59 8 8 8c0 5.52-4.48 10-10 10z"/>
+			</svg>
+			<span>Saving...</span>
+		`;
 		
 		const newSettings = {
 			musicStreamingTranscodingBitrate: parseInt(bitrateSelect.value),
@@ -2584,14 +2855,29 @@ async function renderSettings() {
 			}
 			
 			showToast('Settings saved successfully', 'success');
-			saveBtn.textContent = 'Saved!';
+			saveBtn.innerHTML = `
+				<svg viewBox="0 0 24 24" fill="currentColor">
+					<path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
+				</svg>
+				<span>Saved Successfully!</span>
+			`;
 			setTimeout(() => {
-				saveBtn.textContent = 'Save Settings';
+				saveBtn.innerHTML = `
+					<svg viewBox="0 0 24 24" fill="currentColor">
+						<path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+					</svg>
+					<span>Save All Settings</span>
+				`;
 				saveBtn.disabled = false;
 			}, 2000);
 		} catch (error) {
 			showToast('Failed to save settings: ' + error.message, 'error');
-			saveBtn.textContent = 'Save Settings';
+			saveBtn.innerHTML = `
+				<svg viewBox="0 0 24 24" fill="currentColor">
+					<path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+				</svg>
+				<span>Save All Settings</span>
+			`;
 			saveBtn.disabled = false;
 		}
 	});
@@ -2600,6 +2886,18 @@ async function renderSettings() {
 	container.appendChild(contentWrapper);
 	
 	app.replaceChildren(container);
+	} catch (error) {
+		console.error('Error rendering settings page:', error);
+		console.error('Stack trace:', error.stack);
+		// Show error to user
+		app.innerHTML = `
+			<div style="padding: 40px; text-align: center; color: #fff;">
+				<h2>Error Loading Settings</h2>
+				<p style="color: #ef4444;">${error.message}</p>
+				<p style="color: #999; font-size: 14px; margin-top: 20px;">Check the console for more details.</p>
+			</div>
+		`;
+	}
 }
 
 // Lyrics Page
@@ -3136,6 +3434,9 @@ window.ensureUserId = ensureUserId;
 window.getCurrentUserId = () => currentUserId;
 window.isPinned = isPinned;
 window.togglePin = togglePin;
+
+// Expose route function for re-rendering current page
+window.route = route;
 
 // Create Playlist Modal
 function setupCreatePlaylistModal() {

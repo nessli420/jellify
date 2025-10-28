@@ -758,6 +758,81 @@ class JellyfinClient {
 		}
 	}
 
+	async updatePlaylist(playlistId, data) {
+		if (!playlistId) throw new Error('Playlist ID required');
+		this.assertLoggedIn();
+		
+		console.log('updatePlaylist called with:', { playlistId, data });
+		
+		// For renaming, we only need to send the Name field
+		// DO NOT send Ids field as that would modify the playlist contents
+		const requestBody = {
+			Name: data.name
+		};
+		
+		// Only include Ids if explicitly provided (for other operations like reordering)
+		if (data.ids !== undefined) {
+			requestBody.Ids = data.ids;
+		}
+		
+		console.log('Request body:', requestBody);
+		
+		const url = `${this.serverUrl}/Playlists/${playlistId}`;
+		console.log('Update URL:', url);
+		
+		const res = await fetch(url, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'X-Emby-Authorization': this.getAuthHeader(),
+				'X-Emby-Token': this.token
+			},
+			body: JSON.stringify(requestBody)
+		});
+		
+		console.log('Update response status:', res.status);
+		
+		if (!res.ok) {
+			const errorText = await res.text();
+			console.error('Update failed:', res.status, errorText);
+			throw new Error(`Failed to update playlist: ${res.status} ${res.statusText} - ${errorText}`);
+		}
+		
+		const responseText = await res.text();
+		console.log('Update response:', responseText);
+		
+		return { success: true };
+	}
+
+	async updatePlaylistCover(playlistId, imageData) {
+		if (!playlistId || !imageData) throw new Error('Playlist ID and image data required');
+		this.assertLoggedIn();
+		
+		console.log('updatePlaylistCover called for playlist:', playlistId);
+		
+		// Note: Jellyfin playlists don't support custom cover images through the API
+		// The playlist cover is automatically generated from the first items in the playlist
+		// This is a limitation of Jellyfin, not our application
+		
+		throw new Error('Jellyfin does not support custom cover art for playlists. Playlist covers are automatically generated from the songs within them. To change the cover, modify which song appears first in the playlist.');
+	}
+
+	async removePlaylistCover(playlistId) {
+		if (!playlistId) throw new Error('Playlist ID required');
+		this.assertLoggedIn();
+		
+		await this.apiDelete(`/Items/${playlistId}/Images/Primary`);
+		return { success: true };
+	}
+
+	async deletePlaylist(playlistId) {
+		if (!playlistId) throw new Error('Playlist ID required');
+		this.assertLoggedIn();
+		
+		await this.apiDelete(`/Items/${playlistId}`);
+		return { success: true };
+	}
+
 	// Playback reporting methods
 	async reportPlaybackStart(itemId, canSeek = true, isMuted = false, isPaused = false) {
 		this.assertLoggedIn();

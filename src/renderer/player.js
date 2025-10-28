@@ -115,13 +115,44 @@ const originalQueue = []; // Store original order for shuffle toggle
 let currentIndex = -1;
 let isSeeking = false;
 const mediabar = document.getElementById('mediabar');
-const recentlyPlayed = [];
+let recentlyPlayed = [];
 let isShuffled = false;
 let repeatMode = 'off'; // 'off', 'all', 'one'
 let crossfadeInterval = null;
 let isCrossfading = false;
 let progressReportInterval = null;
 let trackStartTime = 0;
+
+// Recently Played persistence
+function saveRecentlyPlayed() {
+	try {
+		const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+		if (!userId) return;
+		
+		localStorage.setItem(`recentlyPlayed_${userId}`, JSON.stringify(recentlyPlayed));
+	} catch (err) {
+		console.error('Failed to save recently played:', err);
+	}
+}
+
+function loadRecentlyPlayed() {
+	try {
+		const userId = window.getCurrentUserId ? window.getCurrentUserId() : null;
+		if (!userId) return;
+		
+		const saved = localStorage.getItem(`recentlyPlayed_${userId}`);
+		if (saved) {
+			const tracks = JSON.parse(saved);
+			if (Array.isArray(tracks)) {
+				recentlyPlayed.length = 0;
+				recentlyPlayed.push(...tracks);
+				console.log('Loaded recently played tracks:', recentlyPlayed.length);
+			}
+		}
+	} catch (err) {
+		console.error('Failed to load recently played:', err);
+	}
+}
 
 // Playback state persistence
 function savePlaybackState() {
@@ -273,6 +304,9 @@ function loadQueue(tracks, startShuffled = false) {
 	
 	if (startShuffled) {
 		toggleShuffle();
+	} else {
+		// Update button state when loading new queue without shuffle
+		updateShuffleButton();
 	}
 	
 	updateQueueDisplay();
@@ -407,6 +441,7 @@ function updatePlayPauseButton(isPaused) {
 		pauseIcon.style.opacity = '1';
 		pauseIcon.style.pointerEvents = 'auto';
 	}
+	
 }
 
 function next() {
@@ -573,6 +608,9 @@ audio.addEventListener('ended', () => {
 				console.error('Failed to report playback completion:', err);
 			});
 			
+			// Add to recently played
+			addToRecentlyPlayed(track);
+			
 			// Dispatch event for profile page to refresh if it's open
 			window.dispatchEvent(new CustomEvent('trackCompleted', { detail: { track } }));
 		}
@@ -589,10 +627,18 @@ audio.addEventListener('ended', () => {
 
 audio.addEventListener('play', () => {
 	updatePlayPauseButton(false);
+	// Resume equalizer animation
+	document.querySelectorAll('.equalizer .bar').forEach(bar => {
+		bar.style.animationPlayState = 'running';
+	});
 });
 
 audio.addEventListener('pause', () => {
 	updatePlayPauseButton(true);
+	// Pause equalizer animation
+	document.querySelectorAll('.equalizer .bar').forEach(bar => {
+		bar.style.animationPlayState = 'paused';
+	});
 });
 
 function formatTime(s) {
@@ -1087,6 +1133,9 @@ function reloadUserData() {
 		volumeFill.style.width = `${sliderPos * 100}%`;
 	}
 	
+	// Load recently played
+	loadRecentlyPlayed();
+	
 	// Load playback state
 	const restored = loadPlaybackState();
 	if (restored) {
@@ -1100,6 +1149,7 @@ window.player.reloadUserData = reloadUserData;
 
 // Try to restore playback state on load (will work if user is already logged in)
 setTimeout(() => {
+	loadRecentlyPlayed();
 	const restored = loadPlaybackState();
 	if (restored) {
 		console.log('Playback state restored');
@@ -1213,6 +1263,15 @@ const clearQueueBtn = document.getElementById('clear-queue');
 function openQueue() {
     queuePanel.classList.add('visible');
     if (queueBackdrop) queueBackdrop.classList.add('visible');
+    
+    // Always default to Queue tab when opening
+    if (tabQueue && tabRecent && queueView && recentView) {
+        tabQueue.classList.add('active');
+        tabRecent.classList.remove('active');
+        queueView.classList.remove('hidden');
+        recentView.classList.add('hidden');
+    }
+    
     updateQueueDisplay();
 }
 
@@ -1427,6 +1486,8 @@ function removeFromQueue(index) {
 }
 
 function addToRecentlyPlayed(track) {
+    if (!track || !track.id) return;
+    
     // Remove if already exists
     const existingIndex = recentlyPlayed.findIndex(t => t.id === track.id);
     if (existingIndex >= 0) {
@@ -1440,14 +1501,23 @@ function addToRecentlyPlayed(track) {
     if (recentlyPlayed.length > 50) {
         recentlyPlayed.pop();
     }
+    
+    // Save to localStorage
+    saveRecentlyPlayed();
+    
+    console.log('Added to recently played:', track.title, '- Total:', recentlyPlayed.length);
 }
 
 function updateRecentlyPlayedDisplay() {
     const recentList = document.getElementById('recent-list');
+    if (!recentList) return;
+    
     recentList.replaceChildren();
     
+    console.log('Updating recently played display, count:', recentlyPlayed.length);
+    
     if (recentlyPlayed.length === 0) {
-        recentList.innerHTML = '<div class="queue-empty">No recently played tracks</div>';
+        recentList.innerHTML = '<div class="queue-empty">No recently played tracks yet<br><span style="font-size: 12px; opacity: 0.7; margin-top: 8px; display: block;">Tracks you play will appear here</span></div>';
     } else {
         recentlyPlayed.forEach((track, idx) => {
             const item = createQueueItemElement(track, -1, false);
@@ -1464,6 +1534,7 @@ function updateRecentlyPlayedDisplay() {
             item.onclick = () => {
                 queue.push(track);
                 playIndex(queue.length - 1);
+                closeQueue();
             };
             
             recentList.appendChild(item);

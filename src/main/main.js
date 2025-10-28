@@ -307,6 +307,49 @@ ipcMain.handle('jellyfin:removeFromPlaylist', async (_e, { playlistId, entryId }
 	}
 });
 
+ipcMain.handle('jellyfin:updatePlaylist', async (_e, { playlistId, data }) => {
+	try {
+		console.log('IPC: updatePlaylist called with:', { playlistId, data });
+		await jellyfin.updatePlaylist(playlistId, data);
+		console.log('IPC: updatePlaylist successful');
+		return { ok: true };
+	} catch (err) {
+		console.error('IPC: updatePlaylist error:', err);
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:updatePlaylistCover', async (_e, { playlistId, imageData }) => {
+	try {
+		console.log('IPC: updatePlaylistCover called for playlist:', playlistId);
+		console.log('IPC: Image data received, length:', imageData ? imageData.length : 0);
+		const result = await jellyfin.updatePlaylistCover(playlistId, imageData);
+		console.log('IPC: updatePlaylistCover successful, result:', result);
+		return { ok: true, imageUrl: result.imageUrl };
+	} catch (err) {
+		console.error('IPC: updatePlaylistCover error:', err);
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:removePlaylistCover', async (_e, playlistId) => {
+	try {
+		await jellyfin.removePlaylistCover(playlistId);
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
+ipcMain.handle('jellyfin:deletePlaylist', async (_e, playlistId) => {
+	try {
+		await jellyfin.deletePlaylist(playlistId);
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err && err.message ? err.message : String(err) };
+	}
+});
+
 ipcMain.handle('jellyfin:search', async (_e, query) => {
 	try {
 		const results = await jellyfin.search(query, { limit: 50 });
