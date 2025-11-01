@@ -176,18 +176,23 @@ class JellyfinClient {
 			ParentId: albumId,
 			IncludeItemTypes: 'Audio',
 			Recursive: 'true',
-			SortBy: 'IndexNumber,SortName'
+			SortBy: 'IndexNumber,SortName',
+			Limit: '10000'
 		});
 		return data?.Items || [];
 	}
 
 	async getPlaylistTracks(playlistId) {
 		if (!playlistId) throw new Error('playlistId required');
-		const data = await this.apiGet(`/Playlists/${playlistId}/Items`, { Recursive: 'true', SortBy: 'SortName' });
+		const data = await this.apiGet(`/Playlists/${playlistId}/Items`, { 
+			Recursive: 'true', 
+			SortBy: 'SortName',
+			Limit: '10000'
+		});
 		return data?.Items || [];
 	}
 
-	async getArtistSongs(artistId, { limit = 200 } = {}) {
+	async getArtistSongs(artistId, { limit = 10000 } = {}) {
 		if (!artistId) throw new Error('artistId required');
 		const data = await this.apiGet(`/Users/${this.userId}/Items`, {
 			IncludeItemTypes: 'Audio',
@@ -199,7 +204,7 @@ class JellyfinClient {
 		return data?.Items || [];
 	}
 
-	async getArtistAlbums(artistId, { limit = 50 } = {}) {
+	async getArtistAlbums(artistId, { limit = 10000 } = {}) {
 		if (!artistId) throw new Error('artistId required');
 		const data = await this.apiGet(`/Users/${this.userId}/Items`, {
 			IncludeItemTypes: 'MusicAlbum',
@@ -487,7 +492,7 @@ class JellyfinClient {
 		return { success: true };
 	}
 
-	async getFavoriteSongs({ limit = 1000 } = {}) {
+	async getFavoriteSongs({ limit = 10000 } = {}) {
 		this.assertLoggedIn();
 		
 		const data = await this.apiGet(`/Users/${this.userId}/Items`, {
@@ -571,7 +576,7 @@ class JellyfinClient {
 		return data?.Items || [];
 	}
 
-	async getLibrary({ type = 'all', sortBy = 'SortName', limit = 200 } = {}) {
+	async getLibrary({ type = 'all', sortBy = 'SortName', limit = 10000 } = {}) {
 		this.assertLoggedIn();
 		
 		// Use existing working methods instead of a single API call

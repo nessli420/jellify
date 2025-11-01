@@ -1614,7 +1614,7 @@ async function renderLibrary() {
 		
 		// For favourites, we need to load all types to filter them
 		const loadType = currentType === 'favourites' ? 'all' : currentType;
-		const res = await window.api.getLibrary({ type: loadType, sortBy: currentSort, limit: 500 });
+		const res = await window.api.getLibrary({ type: loadType, sortBy: currentSort, limit: 10000 });
 		if (!res.ok) {
 			resultsContainer.replaceChildren(el('div', { class: 'library-error' }, [res.error || 'Failed to load library']));
 			return;
@@ -1910,7 +1910,7 @@ async function renderLibrary() {
 	window.addEventListener('favoritesChanged', async (e) => {
 		console.log('Favorites changed, updating library data silently...');
 		// Reload data in background without showing loading state
-		const res = await window.api.getLibrary({ type: currentType === 'favourites' ? 'all' : currentType, sortBy: currentSort, limit: 500 });
+		const res = await window.api.getLibrary({ type: currentType === 'favourites' ? 'all' : currentType, sortBy: currentSort, limit: 10000 });
 		if (res.ok) {
 			allData = res;
 			console.log('Library data updated:', {
