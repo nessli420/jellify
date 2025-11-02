@@ -52,6 +52,8 @@
     ]
   },
   "dependencies": {
-    "discord-rpc": "^4.0.1"
+    "discord-rpc": "^4.0.1",
+    "luxon": "^3.7.2",
+    "zod": "^4.1.12"
   }
 }

@@ -1481,6 +1481,92 @@ body {
     filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.4));
 }
 
+/* Search bar for albums, playlists, and liked songs */
+.search-bar-container {
+    padding: 0 32px 16px;
+    margin-top: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.search-button-toggle {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.search-button-toggle:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    transform: scale(1.05);
+}
+
+.search-button-toggle svg {
+    width: 20px;
+    height: 20px;
+}
+
+.search-input-wrapper-collapsed {
+    width: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.search-input-wrapper-expanded {
+    width: 100%;
+    max-width: 600px;
+    opacity: 1;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.search-bar {
+    width: 100%;
+    padding: 12px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.search-bar:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.search-bar:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.15);
+    border-color: #1DB954;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
+                0 0 0 3px rgba(29, 185, 84, 0.15);
+    transform: translateY(-1px);
+}
+
+.search-bar::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
 /* Search page */
 .search-page {
     padding: 24px 32px;
@@ -5149,7 +5235,8 @@ body.is-dragging .queue-item:hover .queue-item-remove {
 
 /* Context Menu for Playlists */
 .playlist-context-menu,
-.album-context-menu {
+.album-context-menu,
+.artist-context-menu {
     position: fixed;
     background: #282828;
     border-radius: 6px;

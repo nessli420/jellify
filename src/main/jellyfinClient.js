@@ -576,84 +576,103 @@ class JellyfinClient {
 		return data?.Items || [];
 	}
 
-	async getLibrary({ type = 'all', sortBy = 'SortName', limit = 10000 } = {}) {
+	async getLibrary({ type = 'all', sortBy = 'SortName', limit = 50, startIndex = 0 } = {}) {
 		this.assertLoggedIn();
 		
 		// Use existing working methods instead of a single API call
 		let items = [];
+		let totalCounts = { albums: 0, artists: 0, playlists: 0, songs: 0 };
 		
 		if (type === 'all') {
-		// Fetch all types using existing methods
-		const [albums, artists, playlists] = await Promise.all([
+		// For "all" type, fetch each type separately with pagination
+		// Use full limit for each type to get more items
+		const itemsPerType = limit; // Use full limit per type instead of dividing
+		const startPerType = Math.floor(startIndex / 3);
+		
+		const [albumsData, artistsData, playlistsData] = await Promise.all([
 			this.apiGet(`/Users/${this.userId}/Items`, {
 				IncludeItemTypes: 'MusicAlbum',
 				Recursive: 'true',
 				SortBy: sortBy,
-				Limit: String(limit),
+				StartIndex: String(startPerType),
+				Limit: String(itemsPerType),
 				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
 			}),
 			this.apiGet(`/Users/${this.userId}/Items`, {
 				IncludeItemTypes: 'MusicArtist',
 				Recursive: 'true',
 				SortBy: sortBy,
-				Limit: String(limit),
+				StartIndex: String(startPerType),
+				Limit: String(itemsPerType),
 				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
 			}),
 			this.apiGet(`/Items`, {
 			IncludeItemTypes: 'Playlist',
 			Recursive: 'true',
 			SortBy: sortBy,
-			Limit: String(limit),
+			StartIndex: String(startPerType),
+			Limit: String(itemsPerType),
 			Fields: 'PrimaryImageAspectRatio,Genres,UserData,Path',
 			UserId: this.userId
 			})
 		]);
 			items = [
-				...(albums?.Items || []),
-				...(artists?.Items || []),
-				...(playlists?.Items || [])
+				...(albumsData?.Items || []),
+				...(artistsData?.Items || []),
+				...(playlistsData?.Items || [])
 			];
+			totalCounts.albums = albumsData?.TotalRecordCount || 0;
+			totalCounts.artists = artistsData?.TotalRecordCount || 0;
+			totalCounts.playlists = playlistsData?.TotalRecordCount || 0;
 		} else if (type === 'albums') {
 			const data = await this.apiGet(`/Users/${this.userId}/Items`, {
 				IncludeItemTypes: 'MusicAlbum',
 				Recursive: 'true',
 				SortBy: sortBy,
+				StartIndex: String(startIndex),
 				Limit: String(limit),
 				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
 			});
 			items = data?.Items || [];
+			totalCounts.albums = data?.TotalRecordCount || 0;
 		} else if (type === 'artists') {
 			const data = await this.apiGet(`/Users/${this.userId}/Items`, {
 				IncludeItemTypes: 'MusicArtist',
 				Recursive: 'true',
 				SortBy: sortBy,
+				StartIndex: String(startIndex),
 				Limit: String(limit),
 				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
 			});
 			items = data?.Items || [];
+			totalCounts.artists = data?.TotalRecordCount || 0;
 	} else if (type === 'playlists') {
 		const data = await this.apiGet(`/Items`, {
 			IncludeItemTypes: 'Playlist',
 			Recursive: 'true',
 			SortBy: sortBy,
+			StartIndex: String(startIndex),
 			Limit: String(limit),
 			Fields: 'PrimaryImageAspectRatio,Genres,UserData',
 			UserId: this.userId
 		});
 		items = data?.Items || [];
+		totalCounts.playlists = data?.TotalRecordCount || 0;
 		} else if (type === 'songs') {
 			const data = await this.apiGet(`/Users/${this.userId}/Items`, {
 				IncludeItemTypes: 'Audio',
 				Recursive: 'true',
 				SortBy: sortBy,
+				StartIndex: String(startIndex),
 				Limit: String(limit),
 				Fields: 'PrimaryImageAspectRatio,Genres,UserData'
 			});
 			items = data?.Items || [];
+			totalCounts.songs = data?.TotalRecordCount || 0;
 		}
 		
-		console.log(`getLibrary(type="${type}") returned ${items.length} items`);
-		return items;
+		console.log(`getLibrary(type="${type}", startIndex=${startIndex}, limit=${limit}) returned ${items.length} items`);
+		return { items, totalCounts };
 	}
 
 	async getGenres() {
@@ -891,10 +910,37 @@ class JellyfinClient {
 		};
 		
 		try {
-			await this.apiPost(`/Sessions/Playing/Stopped`, data);
+			const response = await this.apiPost(`/Sessions/Playing/Stopped`, data);
+			console.log(`Playback stopped reported for item ${itemId} at position ${positionTicks}`);
 			return { success: true };
 		} catch (err) {
 			console.error('Failed to report playback stopped:', err);
+			return { success: false, error: err.message };
+		}
+	}
+	
+	async stopAllSessions() {
+		this.assertLoggedIn();
+		
+		try {
+			const sessions = await this.getSessions();
+			const deviceSessions = sessions.filter(s => s.DeviceId === this.deviceId || s.Client === this.clientName);
+			
+			for (const session of deviceSessions) {
+				if (session.NowPlayingItem) {
+					try {
+						const positionTicks = session.PlayState?.PositionTicks || 0;
+						await this.reportPlaybackStopped(session.NowPlayingItem.Id, positionTicks);
+						console.log(`Stopped session ${session.Id} for device ${this.deviceId}`);
+					} catch (err) {
+						console.error(`Failed to stop session ${session.Id}:`, err);
+					}
+				}
+			}
+			
+			return { success: true };
+		} catch (err) {
+			console.error('Failed to stop all sessions:', err);
 			return { success: false, error: err.message };
 		}
 	}

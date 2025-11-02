@@ -45,6 +45,19 @@ class SongContextMenu {
                 <span>Play next</span>
             </div>
             <div class="context-menu-separator"></div>
+            <div class="context-menu-item" id="ctx-go-to-artist">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+                <span>Go to artist</span>
+            </div>
+            <div class="context-menu-item" id="ctx-go-to-album">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
+                </svg>
+                <span>Go to album</span>
+            </div>
+            <div class="context-menu-separator"></div>
             <div class="context-menu-item" id="ctx-add-to-playlist">
                 <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
@@ -97,6 +110,20 @@ class SongContextMenu {
             this.hide();
         });
         
+        // Go to artist
+        document.getElementById('ctx-go-to-artist').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.goToArtist();
+            this.hide();
+        });
+        
+        // Go to album
+        document.getElementById('ctx-go-to-album').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.goToAlbum();
+            this.hide();
+        });
+        
         // Add to playlist (will show submenu)
         document.getElementById('ctx-add-to-playlist').addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -131,12 +158,28 @@ class SongContextMenu {
         
         // Update menu items based on context
         const removeFromPlaylistItem = document.getElementById('ctx-remove-from-playlist');
+        const goToArtistItem = document.getElementById('ctx-go-to-artist');
+        const goToAlbumItem = document.getElementById('ctx-go-to-album');
         const favoriteItem = document.getElementById('ctx-toggle-favorite');
         const favoriteText = favoriteItem.querySelector('.ctx-favorite-text');
         const favoriteIcon = favoriteItem.querySelector('.context-menu-icon');
         const hideItem = document.getElementById('ctx-toggle-hide');
         const hideText = hideItem.querySelector('.ctx-hide-text');
         const hideIcon = hideItem.querySelector('.context-menu-icon');
+        
+        // Show/hide "Go to artist" option
+        if (track.artistId) {
+            goToArtistItem.style.display = 'flex';
+        } else {
+            goToArtistItem.style.display = 'none';
+        }
+        
+        // Show/hide "Go to album" option
+        if (track.albumId) {
+            goToAlbumItem.style.display = 'flex';
+        } else {
+            goToAlbumItem.style.display = 'none';
+        }
         
         // Show/hide "Remove from playlist" option
         if (playlistId) {
@@ -218,6 +261,28 @@ class SongContextMenu {
         if (window.showToast) {
             window.showToast(`"${this.currentTrack.title}" will play next`, 'success');
         }
+    }
+
+    goToArtist() {
+        if (!this.currentTrack || !this.currentTrack.artistId) {
+            if (window.showToast) {
+                window.showToast('Artist information not available', 'error');
+            }
+            return;
+        }
+        
+        location.hash = `artist/${this.currentTrack.artistId}`;
+    }
+
+    goToAlbum() {
+        if (!this.currentTrack || !this.currentTrack.albumId) {
+            if (window.showToast) {
+                window.showToast('Album information not available', 'error');
+            }
+            return;
+        }
+        
+        location.hash = `album/${this.currentTrack.albumId}`;
     }
 
     async showPlaylistSubmenu(event) {
@@ -1001,16 +1066,202 @@ class AlbumContextMenu {
     }
 }
 
+// Artist Context Menu
+class ArtistContextMenu {
+    constructor() {
+        this.menu = null;
+        this.currentArtist = null;
+        this.init();
+    }
+
+    init() {
+        this.createMenu();
+        
+        // Hide menu when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.artist-context-menu')) {
+                this.hide();
+            }
+        });
+        
+        // Hide menu on escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.hide();
+            }
+        });
+    }
+
+    createMenu() {
+        const menu = document.createElement('div');
+        menu.id = 'artist-context-menu';
+        menu.className = 'artist-context-menu';
+        menu.innerHTML = `
+            <div class="context-menu-item" id="ctx-artist-go-to">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
+                </svg>
+                <span>Go to artist</span>
+            </div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" id="ctx-artist-add-to-queue">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/>
+                </svg>
+                <span>Add all songs to queue</span>
+            </div>
+            <div class="context-menu-item" id="ctx-artist-play-next">
+                <svg class="context-menu-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                </svg>
+                <span>Play all songs next</span>
+            </div>
+        `;
+        
+        document.body.appendChild(menu);
+        this.menu = menu;
+        
+        // Add event listeners
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        // Go to artist
+        document.getElementById('ctx-artist-go-to').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.goToArtist();
+            this.hide();
+        });
+        
+        // Add to queue
+        document.getElementById('ctx-artist-add-to-queue').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.addToQueue();
+            this.hide();
+        });
+        
+        // Play next
+        document.getElementById('ctx-artist-play-next').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.playNext();
+            this.hide();
+        });
+    }
+
+    show(x, y, artist) {
+        this.currentArtist = artist;
+        
+        // Position the menu
+        this.menu.style.display = 'block';
+        this.menu.style.left = `${x}px`;
+        this.menu.style.top = `${y}px`;
+        
+        // Adjust position if menu would go off screen
+        const menuRect = this.menu.getBoundingClientRect();
+        const windowWidth = window.innerWidth;
+        const windowHeight = window.innerHeight;
+        
+        if (menuRect.right > windowWidth) {
+            this.menu.style.left = `${windowWidth - menuRect.width - 10}px`;
+        }
+        
+        if (menuRect.bottom > windowHeight) {
+            this.menu.style.top = `${windowHeight - menuRect.height - 10}px`;
+        }
+    }
+
+    hide() {
+        if (this.menu) {
+            this.menu.style.display = 'none';
+        }
+    }
+
+    goToArtist() {
+        if (!this.currentArtist) return;
+        location.hash = `artist/${this.currentArtist.id}`;
+    }
+
+    async addToQueue() {
+        if (!this.currentArtist || !window.player) return;
+        
+        try {
+            // Show loading toast
+            if (window.showToast) {
+                window.showToast('Loading artist songs...', 'info');
+            }
+            
+            // Fetch all songs from the artist
+            const res = await window.api.getArtistSongs(this.currentArtist.id);
+            if (!res.ok || !res.tracks || res.tracks.length === 0) {
+                if (window.showToast) {
+                    window.showToast('No songs found for this artist', 'error');
+                }
+                return;
+            }
+            
+            // Add all tracks to queue
+            res.tracks.forEach(track => {
+                window.player.addToQueue(track);
+            });
+            
+            if (window.showToast) {
+                window.showToast(`Added ${res.tracks.length} songs by "${this.currentArtist.title}" to queue`, 'success');
+            }
+        } catch (error) {
+            console.error('Error adding artist songs to queue:', error);
+            if (window.showToast) {
+                window.showToast('Failed to add artist songs to queue', 'error');
+            }
+        }
+    }
+
+    async playNext() {
+        if (!this.currentArtist || !window.player) return;
+        
+        try {
+            // Show loading toast
+            if (window.showToast) {
+                window.showToast('Loading artist songs...', 'info');
+            }
+            
+            // Fetch all songs from the artist
+            const res = await window.api.getArtistSongs(this.currentArtist.id);
+            if (!res.ok || !res.tracks || res.tracks.length === 0) {
+                if (window.showToast) {
+                    window.showToast('No songs found for this artist', 'error');
+                }
+                return;
+            }
+            
+            // Insert tracks in reverse order so they play in correct order
+            for (let i = res.tracks.length - 1; i >= 0; i--) {
+                window.player.insertNext(res.tracks[i]);
+            }
+            
+            if (window.showToast) {
+                window.showToast(`${res.tracks.length} songs by "${this.currentArtist.title}" will play next`, 'success');
+            }
+        } catch (error) {
+            console.error('Error adding artist songs to play next:', error);
+            if (window.showToast) {
+                window.showToast('Failed to add artist songs to play next', 'error');
+            }
+        }
+    }
+}
+
 // Initialize context menus when DOM is loaded
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         window.songContextMenu = new SongContextMenu();
         window.playlistContextMenu = new PlaylistContextMenu();
         window.albumContextMenu = new AlbumContextMenu();
+        window.artistContextMenu = new ArtistContextMenu();
     });
 } else {
     window.songContextMenu = new SongContextMenu();
     window.playlistContextMenu = new PlaylistContextMenu();
     window.albumContextMenu = new AlbumContextMenu();
+    window.artistContextMenu = new ArtistContextMenu();
 }
 

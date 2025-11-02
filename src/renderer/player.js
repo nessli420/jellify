@@ -100,12 +100,32 @@ if (progressLine) {
         if (isProgressDragging) {
             isProgressDragging = false;
             isSeeking = false;
+            // Report new position after seeking
+            const track = getCurrentTrack();
+            if (track && track.id && window.api) {
+                const position = audio.currentTime || 0;
+                const positionTicks = Math.floor(position * 10000000);
+                window.api.reportPlaybackProgress(track.id, positionTicks, audio.paused, false).catch(err => {
+                    console.error('Failed to report playback progress after seek:', err);
+                });
+            }
         }
     });
     
     progressLine.addEventListener('click', (e) => {
         if (!isProgressDragging) {
             updateProgress(e);
+            // Report new position after clicking progress bar
+            setTimeout(() => {
+                const track = getCurrentTrack();
+                if (track && track.id && window.api) {
+                    const position = audio.currentTime || 0;
+                    const positionTicks = Math.floor(position * 10000000);
+                    window.api.reportPlaybackProgress(track.id, positionTicks, audio.paused, false).catch(err => {
+                        console.error('Failed to report playback progress after click:', err);
+                    });
+                }
+            }, 100);
         }
     });
 }
@@ -251,6 +271,77 @@ startStateSaving();
 function updateUiForTrack(track) {
 	titleEl.textContent = track ? track.title : 'Not Playing';
 	artistEl.textContent = track ? track.artist : '';
+	
+	// Make track title clickable to go to album if albumId is available
+	if (track && track.albumId) {
+		titleEl.style.cursor = 'pointer';
+		titleEl.style.textDecoration = 'none';
+		titleEl.onclick = () => {
+			location.hash = `album/${track.albumId}`;
+		};
+		titleEl.onmouseenter = () => {
+			titleEl.style.textDecoration = 'underline';
+		};
+		titleEl.onmouseleave = () => {
+			titleEl.style.textDecoration = 'none';
+		};
+		// Add context menu for song
+		titleEl.oncontextmenu = (e) => {
+			e.preventDefault();
+			if (window.songContextMenu) {
+				window.songContextMenu.show(e.clientX, e.clientY, track);
+			}
+		};
+	} else if (track) {
+		// If no albumId but we have a track, still allow context menu
+		titleEl.style.cursor = 'default';
+		titleEl.onclick = null;
+		titleEl.onmouseenter = null;
+		titleEl.onmouseleave = null;
+		titleEl.oncontextmenu = (e) => {
+			e.preventDefault();
+			if (window.songContextMenu) {
+				window.songContextMenu.show(e.clientX, e.clientY, track);
+			}
+		};
+	} else {
+		titleEl.style.cursor = 'default';
+		titleEl.onclick = null;
+		titleEl.onmouseenter = null;
+		titleEl.onmouseleave = null;
+		titleEl.oncontextmenu = null;
+	}
+	
+	// Make artist name clickable if artistId is available
+	if (track && track.artistId) {
+		artistEl.style.cursor = 'pointer';
+		artistEl.style.textDecoration = 'none';
+		artistEl.onclick = () => {
+			location.hash = `artist/${track.artistId}`;
+		};
+		artistEl.onmouseenter = () => {
+			artistEl.style.textDecoration = 'underline';
+		};
+		artistEl.onmouseleave = () => {
+			artistEl.style.textDecoration = 'none';
+		};
+		// Add context menu for artist
+		artistEl.oncontextmenu = (e) => {
+			e.preventDefault();
+			if (window.artistContextMenu) {
+				window.artistContextMenu.show(e.clientX, e.clientY, {
+					id: track.artistId,
+					title: track.artist
+				});
+			}
+		};
+	} else {
+		artistEl.style.cursor = 'default';
+		artistEl.onclick = null;
+		artistEl.onmouseenter = null;
+		artistEl.onmouseleave = null;
+		artistEl.oncontextmenu = null;
+	}
 	
 	// Handle album art with placeholder
 	if (track && track.image) {
@@ -415,14 +506,38 @@ function getPlaybackSettings() {
 
 function togglePlayPause() {
 	if (audio.paused) {
-	if (currentIndex === -1 && queue.length > 0) {
-		playIndex(0);
+		if (currentIndex === -1 && queue.length > 0) {
+			playIndex(0);
 		} else {
-			audio.play();
+			const playPromise = audio.play();
+			if (playPromise !== undefined) {
+				playPromise.then(() => {
+					// Report playback resumed to Jellyfin
+					const track = getCurrentTrack();
+					if (track && track.id && window.api) {
+						const position = audio.currentTime || 0;
+						const positionTicks = Math.floor(position * 10000000);
+						window.api.reportPlaybackProgress(track.id, positionTicks, false, false).catch(err => {
+							console.error('Failed to report playback resumed:', err);
+						});
+					}
+				}).catch(error => {
+					console.error('Resume failed:', error);
+				});
+			}
 			updatePlayPauseButton(false);
 		}
 	} else {
 		audio.pause();
+		// Report playback paused to Jellyfin immediately
+		const track = getCurrentTrack();
+		if (track && track.id && window.api) {
+			const position = audio.currentTime || 0;
+			const positionTicks = Math.floor(position * 10000000);
+			window.api.reportPlaybackProgress(track.id, positionTicks, true, false).catch(err => {
+				console.error('Failed to report playback paused:', err);
+			});
+		}
 		updatePlayPauseButton(true);
 	}
 }
@@ -631,6 +746,16 @@ audio.addEventListener('play', () => {
 	document.querySelectorAll('.equalizer .bar').forEach(bar => {
 		bar.style.animationPlayState = 'running';
 	});
+	
+	// Report playback resumed to Jellyfin
+	const track = getCurrentTrack();
+	if (track && track.id && window.api) {
+		const position = audio.currentTime || 0;
+		const positionTicks = Math.floor(position * 10000000);
+		window.api.reportPlaybackProgress(track.id, positionTicks, false, false).catch(err => {
+			console.error('Failed to report playback resumed:', err);
+		});
+	}
 });
 
 audio.addEventListener('pause', () => {
@@ -639,6 +764,16 @@ audio.addEventListener('pause', () => {
 	document.querySelectorAll('.equalizer .bar').forEach(bar => {
 		bar.style.animationPlayState = 'paused';
 	});
+	
+	// Report playback paused to Jellyfin
+	const track = getCurrentTrack();
+	if (track && track.id && window.api) {
+		const position = audio.currentTime || 0;
+		const positionTicks = Math.floor(position * 10000000);
+		window.api.reportPlaybackProgress(track.id, positionTicks, true, false).catch(err => {
+			console.error('Failed to report playback paused:', err);
+		});
+	}
 });
 
 function formatTime(s) {
@@ -837,6 +972,15 @@ if (fullscreenProgressLine) {
 		if (isFullscreenProgressDragging) {
 			isFullscreenProgressDragging = false;
 			isSeeking = false;
+			// Report new position after seeking
+			const track = getCurrentTrack();
+			if (track && track.id && window.api) {
+				const position = audio.currentTime || 0;
+				const positionTicks = Math.floor(position * 10000000);
+				window.api.reportPlaybackProgress(track.id, positionTicks, audio.paused, false).catch(err => {
+					console.error('Failed to report playback progress after seek:', err);
+				});
+			}
 		}
 	});
 }

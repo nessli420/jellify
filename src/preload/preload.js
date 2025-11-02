@@ -48,12 +48,10 @@ contextBridge.exposeInMainWorld('api', {
 	windowSetFullscreen: (flag) => ipcRenderer.invoke('window:setFullscreen', flag),
 	windowIsFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),
 	// Discord RPC
-	discordUpdatePresence: (track, isPaused, currentTime, duration) => 
-		ipcRenderer.invoke('discord:updatePresence', { track, isPaused, currentTime, duration }),
-	discordClearActivity: () => ipcRenderer.invoke('discord:clearActivity'),
-	discordSetIdlePresence: () => ipcRenderer.invoke('discord:setIdlePresence'),
 	discordIsConnected: () => ipcRenderer.invoke('discord:isConnected'),
-	discordUpdateClientId: (clientId, enabled) => ipcRenderer.invoke('discord:updateClientId', { clientId, enabled })
+	discordUpdateSettings: (jellyfinUrl, jellyfinApiKey, jellyfinUsers, discordClientId, enabled) => 
+		ipcRenderer.invoke('discord:updateSettings', { jellyfinUrl, jellyfinApiKey, jellyfinUsers, discordClientId, enabled }),
+	discordGetSettings: () => ipcRenderer.invoke('discord:getSettings')
 });
 
 

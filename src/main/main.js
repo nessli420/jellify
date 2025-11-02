@@ -29,6 +29,69 @@ function createMainWindow() {
 
 	mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 	
+	// Handle window close - report playback stopped before closing
+	mainWindow.on('close', async (event) => {
+		// Prevent immediate close
+		event.preventDefault();
+		
+		try {
+			// Get current track info before window closes
+			const currentTrack = await mainWindow.webContents.executeJavaScript(`
+				(window.player && window.player.getCurrentTrack && window.player.getCurrentTrack()) || null
+			`);
+			const currentTime = await mainWindow.webContents.executeJavaScript(`
+				document.getElementById('audio') ? document.getElementById('audio').currentTime || 0 : 0
+			`);
+			
+			if (currentTrack && currentTrack.id) {
+				const positionTicks = Math.floor(currentTime * 10000000);
+				console.log(`Reporting playback stopped for track ${currentTrack.id} at position ${positionTicks}`);
+				// Wait for the request to complete with a timeout
+				try {
+					const result = await Promise.race([
+						jellyfin.reportPlaybackStopped(currentTrack.id, positionTicks),
+						new Promise((resolve) => setTimeout(() => resolve({ success: false, timeout: true }), 2000))
+					]);
+					if (result.success) {
+						console.log('Playback stopped reported successfully');
+					} else if (result.timeout) {
+						console.warn('Playback stopped report timed out, trying to stop all sessions');
+						// Fallback: try to stop all sessions for this device
+						await jellyfin.stopAllSessions().catch(err => {
+							console.error('Failed to stop all sessions:', err);
+						});
+					}
+				} catch (err) {
+					console.error('Failed to report playback stopped:', err);
+					// Fallback: try to stop all sessions for this device
+					await jellyfin.stopAllSessions().catch(err => {
+						console.error('Failed to stop all sessions:', err);
+					});
+				}
+			} else {
+				console.log('No current track found, trying to stop all sessions for this device');
+				// Fallback: try to stop all sessions for this device
+				await jellyfin.stopAllSessions().catch(err => {
+					console.error('Failed to stop all sessions:', err);
+				});
+			}
+		} catch (err) {
+			console.error('Error getting current track on window close:', err);
+			// Fallback: try to stop all sessions for this device
+			try {
+				await jellyfin.stopAllSessions();
+			} catch (fallbackErr) {
+				console.error('Fallback: Failed to stop all sessions:', fallbackErr);
+			}
+		}
+		
+		// Cleanup Discord RPC
+		await discordRPC.disconnect();
+		
+		// Now actually close the window
+		mainWindow.destroy();
+	});
+	
 	// Store reference for window controls
 	global.mainWindow = mainWindow;
 }
@@ -36,11 +99,43 @@ function createMainWindow() {
 app.whenReady().then(() => {
 	createMainWindow();
 
-	// Initialize Discord RPC after a short delay to allow settings to load
+	// Initialize Discord RPC if enabled
+	// Delay to ensure window is fully loaded
 	setTimeout(() => {
-		discordRPC.connect().catch(err => {
-			console.error('Failed to initialize Discord RPC:', err);
-		});
+		if (discordRPC.enabled) {
+			// If no server URL configured, try to use current logged-in server URL
+			const settings = discordRPC.getSettings();
+			let needsUpdate = false;
+			let serverUrlToUse = settings.jellyfinUrl;
+			let usersToUse = settings.jellyfinUsers;
+			
+			if (!serverUrlToUse && jellyfin.serverUrl) {
+				serverUrlToUse = jellyfin.serverUrl;
+				needsUpdate = true;
+				console.log(`Discord RPC: Auto-configuring with logged-in server URL: ${serverUrlToUse}`);
+			}
+			
+			// If no users configured, try to use current logged-in user
+			if ((!usersToUse || usersToUse.length === 0) && currentUser && currentUser.Name) {
+				usersToUse = [currentUser.Name];
+				needsUpdate = true;
+				console.log(`Discord RPC: Auto-configuring with logged-in user: ${currentUser.Name}`);
+			}
+			
+			if (needsUpdate) {
+				discordRPC.updateSettings(
+					serverUrlToUse || '',
+					settings.jellyfinApiKey,
+					usersToUse || [],
+					settings.clientId,
+					settings.enabled
+				);
+			}
+			
+			discordRPC.connect().catch(err => {
+				console.log('Discord RPC not available (Discord may not be running):', err.message);
+			});
+		}
 	}, 2000);
 
 	app.on('activate', () => {
@@ -53,6 +148,29 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+	// Report playback stopped to Jellyfin if there's a current track
+	try {
+		const mainWindow = BrowserWindow.getAllWindows()[0];
+		if (mainWindow && !mainWindow.isDestroyed()) {
+			const currentTrack = await mainWindow.webContents.executeJavaScript(`
+				(window.player && window.player.getCurrentTrack && window.player.getCurrentTrack()) || null
+			`);
+			const currentTime = await mainWindow.webContents.executeJavaScript(`
+				document.getElementById('audio') ? document.getElementById('audio').currentTime || 0 : 0
+			`);
+			
+			if (currentTrack && currentTrack.id) {
+				const positionTicks = Math.floor(currentTime * 10000000);
+				console.log(`Reporting playback stopped for track ${currentTrack.id} at position ${positionTicks}`);
+				await jellyfin.reportPlaybackStopped(currentTrack.id, positionTicks).catch(err => {
+					console.error('Failed to report playback stopped:', err);
+				});
+			}
+		}
+	} catch (err) {
+		console.error('Error getting current track on quit:', err);
+	}
+	
 	// Cleanup Discord RPC
 	await discordRPC.disconnect();
 });
@@ -65,6 +183,27 @@ ipcMain.handle('jellyfin:login', async (_event, { serverUrl, username, password 
 	try {
 		const { user, token } = await jellyfin.login({ serverUrl, username, password });
 		currentUser = user;
+		
+		// Update Discord RPC with current user and server URL if enabled
+		if (discordRPC.enabled && user && user.Name) {
+			const settings = discordRPC.getSettings();
+			// Only update if users list is empty or doesn't include current user, or if server URL is missing
+			const needsUpdate = !settings.jellyfinUsers || settings.jellyfinUsers.length === 0 || 
+				!settings.jellyfinUsers.includes(user.Name) ||
+				!settings.jellyfinUrl || settings.jellyfinUrl !== serverUrl.replace(/\/$/, '');
+			
+			if (needsUpdate) {
+				console.log(`Discord RPC: Updating with logged-in user: ${user.Name} and server: ${serverUrl}`);
+				discordRPC.updateSettings(
+					serverUrl.replace(/\/$/, ''),
+					settings.jellyfinApiKey,
+					[user.Name],
+					settings.clientId,
+					settings.enabled
+				);
+			}
+		}
+		
 		return { ok: true, user, token };
 	} catch (err) {
 		return { ok: false, error: err && err.message ? err.message : String(err) };
@@ -84,9 +223,9 @@ ipcMain.handle('jellyfin:getCurrentUser', async () => {
 ipcMain.handle('jellyfin:getHome', async () => {
 	try {
 		const [albums, artists, playlists] = await Promise.all([
-			jellyfin.getAlbums({ limit: 50 }),
-			jellyfin.getArtists({ limit: 30 }),
-			jellyfin.getPlaylists({ limit: 30 })
+			jellyfin.getAlbums({ limit: 20 }),
+			jellyfin.getArtists({ limit: 20 }),
+			jellyfin.getPlaylists({ limit: 20 })
 		]);
 		const withImages = (items) => items.map((it) => ({
 			id: it.Id,
@@ -109,7 +248,9 @@ ipcMain.handle('jellyfin:getAlbumTracks', async (_event, albumId) => {
 			id: t.Id,
 			title: t.Name,
 			album: t.Album || '',
+			albumId: t.AlbumId || albumId,
 			artist: (t.Artists && t.Artists[0]) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Name) || '',
+			artistId: (t.ArtistItems && t.ArtistItems[0] && t.ArtistItems[0].Id) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Id) || null,
 			durationMs: (t.RunTimeTicks || 0) / 10000,
 			streamUrl: jellyfin.getStreamUrl(t.Id),
 			image: jellyfin.getAudioImageUrl(t),
@@ -164,7 +305,9 @@ ipcMain.handle('jellyfin:getPlaylistTracks', async (_e, playlistId) => {
 			id: t.Id,
 			title: t.Name,
 			album: t.Album || '',
+			albumId: t.AlbumId || null,
 			artist: (t.Artists && t.Artists[0]) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Name) || '',
+			artistId: (t.ArtistItems && t.ArtistItems[0] && t.ArtistItems[0].Id) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Id) || null,
 			durationMs: (t.RunTimeTicks || 0) / 10000,
 			streamUrl: jellyfin.getStreamUrl(t.Id),
 			image: jellyfin.getAudioImageUrl(t),
@@ -183,7 +326,9 @@ ipcMain.handle('jellyfin:getArtistSongs', async (_e, artistId) => {
 			id: t.Id,
 			title: t.Name,
 			album: t.Album || '',
+			albumId: t.AlbumId || null,
 			artist: (t.Artists && t.Artists[0]) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Name) || '',
+			artistId: (t.ArtistItems && t.ArtistItems[0] && t.ArtistItems[0].Id) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Id) || artistId,
 			durationMs: (t.RunTimeTicks || 0) / 10000,
 			streamUrl: jellyfin.getStreamUrl(t.Id),
 			image: jellyfin.getAudioImageUrl(t),
@@ -277,7 +422,9 @@ ipcMain.handle('jellyfin:getFavoriteSongs', async () => {
 			id: t.Id,
 			title: t.Name,
 			album: t.Album || '',
+			albumId: t.AlbumId || null,
 			artist: (t.Artists && t.Artists[0]) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Name) || '',
+			artistId: (t.ArtistItems && t.ArtistItems[0] && t.ArtistItems[0].Id) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Id) || null,
 			durationMs: (t.RunTimeTicks || 0) / 10000,
 			streamUrl: jellyfin.getStreamUrl(t.Id),
 			image: jellyfin.getAudioImageUrl(t),
@@ -375,7 +522,9 @@ ipcMain.handle('jellyfin:search', async (_e, query) => {
 			id: t.Id,
 			title: t.Name,
 			album: t.Album || '',
+			albumId: t.AlbumId || null,
 			artist: (t.Artists && t.Artists[0]) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Name) || '',
+			artistId: (t.ArtistItems && t.ArtistItems[0] && t.ArtistItems[0].Id) || (t.AlbumArtists && t.AlbumArtists[0] && t.AlbumArtists[0].Id) || null,
 			durationMs: (t.RunTimeTicks || 0) / 10000,
 			streamUrl: jellyfin.getStreamUrl(t.Id),
 			image: jellyfin.getAudioImageUrl(t),
@@ -408,7 +557,7 @@ ipcMain.handle('jellyfin:search', async (_e, query) => {
 
 ipcMain.handle('jellyfin:getLibrary', async (_e, options) => {
 	try {
-		const items = await jellyfin.getLibrary(options);
+		const { items, totalCounts } = await jellyfin.getLibrary(options);
 		
 		// Categorize and format items
 		const albums = [];
@@ -454,7 +603,9 @@ ipcMain.handle('jellyfin:getLibrary', async (_e, options) => {
 					id: it.Id,
 					title: it.Name,
 					album: it.Album || '',
+					albumId: it.AlbumId || null,
 					artist: (it.Artists && it.Artists[0]) || (it.AlbumArtists && it.AlbumArtists[0] && it.AlbumArtists[0].Name) || '',
+					artistId: (it.ArtistItems && it.ArtistItems[0] && it.ArtistItems[0].Id) || (it.AlbumArtists && it.AlbumArtists[0] && it.AlbumArtists[0].Id) || null,
 					durationMs: (it.RunTimeTicks || 0) / 10000,
 					streamUrl: jellyfin.getStreamUrl(it.Id),
 					image: jellyfin.getAudioImageUrl(it),
@@ -493,7 +644,7 @@ ipcMain.handle('jellyfin:getLibrary', async (_e, options) => {
 		
 		console.log(`getLibrary response: ${albums.length} albums (${albums.filter(a => a.isFavorite).length} favorited), ${playlists.length} playlists (${playlists.filter(p => p.isFavorite).length} favorited)`);
 		
-		return { ok: true, albums, artists, playlists, songs };
+		return { ok: true, albums, artists, playlists, songs, totalCounts };
 	} catch (err) {
 		return { ok: false, error: err && err.message ? err.message : String(err) };
 	}
@@ -814,44 +965,41 @@ ipcMain.handle('window:isFullscreen', () => {
 });
 
 // Discord RPC handlers
-ipcMain.handle('discord:updatePresence', async (_e, { track, isPaused, currentTime, duration }) => {
-	try {
-		await discordRPC.updatePresence(track, isPaused, currentTime, duration);
-		return { ok: true };
-	} catch (err) {
-		return { ok: false, error: err && err.message ? err.message : String(err) };
-	}
-});
-
-ipcMain.handle('discord:clearActivity', async () => {
-	try {
-		await discordRPC.clearActivity();
-		return { ok: true };
-	} catch (err) {
-		return { ok: false, error: err && err.message ? err.message : String(err) };
-	}
-});
-
-ipcMain.handle('discord:setIdlePresence', async () => {
-	try {
-		await discordRPC.setIdlePresence();
-		return { ok: true };
-	} catch (err) {
-		return { ok: false, error: err && err.message ? err.message : String(err) };
-	}
-});
-
 ipcMain.handle('discord:isConnected', () => {
 	return discordRPC.isConnected();
 });
 
-ipcMain.handle('discord:updateClientId', async (_e, { clientId, enabled }) => {
+ipcMain.handle('discord:updateSettings', async (_e, { jellyfinUrl, jellyfinApiKey, jellyfinUsers, discordClientId, enabled }) => {
 	try {
-		await discordRPC.updateClientId(clientId, enabled);
+		// If no server URL provided, use the current logged-in server URL
+		let serverUrlToUse = jellyfinUrl;
+		if (!serverUrlToUse && jellyfin.serverUrl) {
+			serverUrlToUse = jellyfin.serverUrl;
+			console.log(`Discord RPC: Using current logged-in server URL: ${serverUrlToUse}`);
+		}
+		
+		// If no users provided, use the current logged-in user
+		let usersToUse = jellyfinUsers;
+		if (!usersToUse || usersToUse.length === 0) {
+			if (currentUser && currentUser.Name) {
+				usersToUse = [currentUser.Name];
+				console.log(`Discord RPC: Using current logged-in user: ${currentUser.Name}`);
+			} else {
+				console.warn('Discord RPC: No users provided and no user logged in');
+			}
+		}
+		discordRPC.updateSettings(serverUrlToUse || '', jellyfinApiKey, usersToUse || [], discordClientId, enabled);
 		return { ok: true };
 	} catch (err) {
 		return { ok: false, error: err && err.message ? err.message : String(err) };
 	}
+});
+
+ipcMain.handle('discord:getSettings', () => {
+	return {
+		ok: true,
+		settings: discordRPC.getSettings()
+	};
 });
 
 

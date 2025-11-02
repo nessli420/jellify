@@ -215,6 +215,8 @@ function renderLogin() {
 			loginOverlay.classList.add('hidden');
 			layout.classList.remove('hidden');
 			await loadUserProfile();
+			// Dispatch login event
+			window.dispatchEvent(new CustomEvent('login', { detail: { serverUrl: server } }));
 			route();
 		} catch (e) {
 			// Show error message in a non-blocking way
@@ -252,6 +254,8 @@ function renderLogin() {
 					loginOverlay.classList.add('hidden');
 					layout.classList.remove('hidden');
 					await loadUserProfile();
+					// Dispatch login event
+					window.dispatchEvent(new CustomEvent('login', { detail: { serverUrl } }));
 					route();
 				} else {
 					submitBtn.disabled = false;
@@ -341,60 +345,210 @@ function getGreetingGradient() {
 	}
 }
 
+// Reusable virtual scrolling system for grids with optional API fetching
+function createVirtualGrid(items, createCardFn, options = {}) {
+	const {
+		initialBatch = 40,
+		batchSize = 40,
+		containerClass = 'grid',
+		onLoadMore = null // Optional callback to fetch more data from API
+	} = options;
+	
+	const grid = el('div', { class: containerClass });
+	let renderedCount = 0;
+	let allRendered = false;
+	let isLoadingMore = false;
+	const renderedCards = new Map(); // Track which cards are rendered
+	
+	const sentinel = el('div', { 
+		class: 'virtual-scroll-sentinel',
+		style: 'height: 1px; width: 100%; visibility: hidden; grid-column: 1 / -1;'
+	});
+	
+	function renderBatch(startIdx, endIdx, append = false) {
+		const fragment = document.createDocumentFragment();
+		
+		for (let idx = startIdx; idx < endIdx && idx < items.length; idx++) {
+			if (!renderedCards.has(idx)) {
+				const card = createCardFn(items[idx], idx);
+				renderedCards.set(idx, card);
+				fragment.appendChild(card);
+			}
+		}
+		
+		if (append) {
+			grid.appendChild(fragment);
+		} else {
+			grid.replaceChildren(fragment);
+		}
+		
+		renderedCount = Math.max(renderedCount, Math.min(endIdx, items.length));
+		
+		if (renderedCount >= items.length) {
+			allRendered = true;
+			sentinel.remove();
+		} else if (append) {
+			grid.appendChild(sentinel);
+		}
+	}
+	
+	async function loadMore() {
+		if (allRendered || isLoadingMore) return;
+		
+		// Check if we need to fetch more from API
+		if (onLoadMore && renderedCount >= items.length * 0.4) {
+			// When we've rendered 40% of available items, fetch more from API (earlier trigger for fast scrolling)
+			isLoadingMore = true;
+			try {
+				await onLoadMore();
+				// After fetching, updateItems will be called to update the grid
+				// But we need to wait a bit for the DOM to update
+				setTimeout(() => {
+					isLoadingMore = false;
+					// If items array was updated externally, reset allRendered
+					if (renderedCount < items.length) {
+						allRendered = false;
+						if (!grid.contains(sentinel)) {
+							grid.appendChild(sentinel);
+						}
+					}
+				}, 100);
+			} catch (error) {
+				console.error('Error loading more items:', error);
+				isLoadingMore = false;
+			}
+		} else {
+			// Just render more from existing items
+			const nextBatchEnd = Math.min(renderedCount + batchSize, items.length);
+			renderBatch(renderedCount, nextBatchEnd, true);
+		}
+	}
+	
+	// Initial render
+	if (items.length <= initialBatch) {
+		renderBatch(0, items.length, false);
+	} else {
+		renderBatch(0, initialBatch, false);
+		grid.appendChild(sentinel);
+		
+		// Use IntersectionObserver for automatic loading
+		const observer = new IntersectionObserver((entries) => {
+			entries.forEach(entry => {
+				if (entry.isIntersecting && !allRendered && !isLoadingMore) {
+					loadMore();
+				}
+			});
+		}, {
+			root: null,
+			rootMargin: '1500px',
+			threshold: 0.01
+		});
+		
+		observer.observe(sentinel);
+		
+		// Clean up observer when all loaded
+		const checkComplete = () => {
+			if (allRendered && !onLoadMore) {
+				observer.disconnect();
+			} else {
+				setTimeout(checkComplete, 1000);
+			}
+		};
+		setTimeout(checkComplete, 1000);
+	}
+	
+	// Return cleanup function and update function
+	return {
+		grid,
+		updateItems: (newItems) => {
+			// Update the items array and re-render if needed
+			const oldLength = items.length;
+			items = newItems;
+			
+			// If we have more items now, continue rendering
+			if (items.length > oldLength) {
+				allRendered = false;
+				if (renderedCount < items.length) {
+					// Render more items
+					const nextBatchEnd = Math.min(renderedCount + batchSize, items.length);
+					renderBatch(renderedCount, nextBatchEnd, true);
+					// Re-add sentinel if needed
+					if (!grid.contains(sentinel)) {
+						grid.appendChild(sentinel);
+					}
+				}
+			}
+		},
+		cleanup: () => {
+			renderedCards.clear();
+		}
+	};
+}
+
+function createCardElement(item, onClick, type = 'album') {
+	const imgWrapper = el('div', { class: 'card-image-wrapper' });
+	imgWrapper.setAttribute('data-type', type);
+	
+	const img = el('img', { src: item.image || '', alt: item.title });
+	const playBtn = createPlayButton(() => onClick(item));
+	
+	imgWrapper.appendChild(img);
+	imgWrapper.appendChild(playBtn);
+	handleImageError(imgWrapper, img);
+	
+	const card = el('div', { class: 'card' }, [
+		imgWrapper,
+		el('div', { class: 'meta' }, [
+			el('div', { class: 'title' }, [item.title || 'Untitled']),
+			el('div', { class: 'subtitle' }, [item.subtitle || ''])
+		])
+	]);
+	
+	card.addEventListener('click', (e) => {
+		if (!e.target.closest('.card-play-btn')) {
+			onClick(item);
+		}
+	});
+	
+	// Add context menus
+	if (type === 'playlist') {
+		card.addEventListener('contextmenu', async (e) => {
+			e.preventDefault();
+			if (window.playlistContextMenu) {
+				await window.playlistContextMenu.show(e.clientX, e.clientY, item);
+			}
+		});
+	} else if (type === 'album') {
+		card.addEventListener('contextmenu', async (e) => {
+			e.preventDefault();
+			if (window.albumContextMenu) {
+				await window.albumContextMenu.show(e.clientX, e.clientY, item);
+			}
+		});
+	} else if (type === 'artist') {
+		card.addEventListener('contextmenu', (e) => {
+			e.preventDefault();
+			if (window.artistContextMenu) {
+				window.artistContextMenu.show(e.clientX, e.clientY, item);
+			}
+		});
+	}
+	
+	return card;
+}
+
 function homeSection(title, items, onClick, type = 'album') {
+	const { grid } = createVirtualGrid(
+		items,
+		(item) => createCardElement(item, onClick, type),
+		{ initialBatch: 20, batchSize: 20 }
+	);
+	
 	return el('div', { class: 'home-section' }, [
 		el('div', { class: 'section-header' }, [
 			el('h2', {}, [title])
 		]),
-		el('div', { class: 'grid' }, items.map((it) => {
-			const imgWrapper = el('div', { class: 'card-image-wrapper' });
-			imgWrapper.setAttribute('data-type', type);
-			
-			const img = el('img', { src: it.image || '', alt: it.title });
-			const playBtn = createPlayButton(() => {
-				// Play logic will be implemented based on type
-				onClick(it);
-			});
-			
-			imgWrapper.appendChild(img);
-			imgWrapper.appendChild(playBtn);
-			
-			// Handle missing images
-			handleImageError(imgWrapper, img);
-			
-			const card = el('div', { class: 'card' }, [
-				imgWrapper,
-				el('div', { class: 'meta' }, [
-					el('div', { class: 'title' }, [it.title || 'Untitled']),
-					el('div', { class: 'subtitle' }, [it.subtitle || ''])
-				])
-			]);
-			// Make card clickable except for play button
-			card.addEventListener('click', (e) => {
-				if (!e.target.closest('.card-play-btn')) {
-					onClick(it);
-				}
-			});
-			
-		// Add context menu handler for playlists and albums
-		if (type === 'playlist') {
-			card.addEventListener('contextmenu', async (e) => {
-				e.preventDefault();
-				if (window.playlistContextMenu) {
-					await window.playlistContextMenu.show(e.clientX, e.clientY, it);
-				}
-			});
-		} else if (type === 'album') {
-			card.addEventListener('contextmenu', async (e) => {
-				e.preventDefault();
-				if (window.albumContextMenu) {
-					await window.albumContextMenu.show(e.clientX, e.clientY, it);
-				}
-			});
-		}
-		
-		return card;
-		}))
+		grid
 	]);
 }
 
@@ -548,14 +702,229 @@ async function renderArtistsPage() {
 	app.replaceChildren(view);
 }
 
-function tracksList(title, tracks, onSelect, playlistId = null, isAlbumView = false) {
+function tracksList(title, tracks, onSelect, playlistId = null, isAlbumView = false, onLoadMore = null) {
 	const tbody = el('tbody', {});
+	let renderedCount = 0;
+	const INITIAL_BATCH = 100; // Render first 100 tracks immediately
+	const BATCH_SIZE = 100; // Load 100 more at a time
+	let isLoading = false;
+	let isLoadingMore = false;
+	let allRendered = false;
+	let currentTracks = tracks; // Store reference to tracks array
+	let sentinelObserver = null; // Store observer reference
 	
-	function renderTracks() {
+	// Store scroll position before updates
+	function saveScrollPosition() {
+		// Find the scrollable container (usually the main content area)
+		const scrollContainer = tbody.closest('.library-section')?.parentElement || 
+		                       tbody.closest('.tracks-section')?.parentElement ||
+		                       document.querySelector('.main-content') ||
+		                       document.documentElement;
+		return {
+			scrollTop: scrollContainer.scrollTop,
+			scrollHeight: scrollContainer.scrollHeight,
+			container: scrollContainer
+		};
+	}
+	
+	function restoreScrollPosition(savedPos) {
+		if (!savedPos || !savedPos.container) return;
+		const container = savedPos.container;
+		
+		// Wait for DOM to update, then restore scroll position
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				// Since we're appending content at the end, scroll position should remain the same
+				// The user's current view should stay where it is
+				container.scrollTop = savedPos.scrollTop;
+			});
+		});
+	}
+	
+	function renderBatch(startIdx, endIdx, append = false) {
 		const currentTrack = window.player?.getCurrentTrack?.();
 		const currentTrackId = currentTrack ? currentTrack.id : null;
 		
-		tbody.replaceChildren(...tracks.map((t, idx) => {
+		const fragment = document.createDocumentFragment();
+		
+		for (let idx = startIdx; idx < endIdx && idx < currentTracks.length; idx++) {
+			const t = currentTracks[idx];
+			if (!t) continue;
+			
+			const row = createTrackRow(t, idx, currentTrackId, playlistId, isAlbumView, onSelect);
+			fragment.appendChild(row);
+		}
+		
+		if (append) {
+			tbody.appendChild(fragment);
+		} else {
+			tbody.replaceChildren(fragment);
+		}
+		
+		renderedCount = endIdx;
+		// Only set allRendered if we've rendered all tracks AND there's no API loading possible
+		if (renderedCount >= currentTracks.length) {
+			allRendered = !onLoadMore; // If we have onLoadMore, don't mark as all rendered yet - more might come
+			
+			// If we've rendered all tracks and have API loading, trigger it immediately
+			if (onLoadMore && !isLoadingMore) {
+				// Small delay to ensure DOM is updated
+				setTimeout(() => {
+					if (!isLoadingMore && !allRendered) {
+						loadMoreTracks();
+					}
+				}, 100);
+			}
+		}
+	}
+	
+	function renderTracks(fullRefresh = false) {
+		const currentTrack = window.player?.getCurrentTrack?.();
+		const currentTrackId = currentTrack ? currentTrack.id : null;
+		
+		// For small lists without API loading, render everything
+		if (currentTracks.length <= 100 && !onLoadMore) {
+			const fragment = document.createDocumentFragment();
+			currentTracks.forEach((t, idx) => {
+				const row = createTrackRow(t, idx, currentTrackId, playlistId, isAlbumView, onSelect);
+				fragment.appendChild(row);
+			});
+			tbody.replaceChildren(fragment);
+			renderedCount = currentTracks.length;
+			allRendered = true;
+		} else {
+			// For large lists or when using API loading, use progressive rendering
+			renderBatch(0, Math.min(INITIAL_BATCH, currentTracks.length), false);
+		}
+	}
+	
+	async function loadMoreTracks() {
+		if (isLoading || isLoadingMore) return;
+		
+		// If we've rendered all tracks but have API loading, still allow loading
+		if (allRendered && !onLoadMore) return;
+		
+		// Check if we need to fetch more from API
+		// Trigger API call when we've rendered a significant portion OR when we've rendered all available tracks
+		const shouldFetchFromAPI = onLoadMore && (
+			renderedCount >= Math.max(currentTracks.length * 0.4, currentTracks.length - 20) || 
+			renderedCount >= currentTracks.length ||
+			allRendered
+		);
+		
+		if (shouldFetchFromAPI) {
+			// When we've rendered 40% of available tracks, or within 20 tracks of the end, or all tracks, fetch more from API
+			isLoadingMore = true;
+			try {
+				await onLoadMore();
+				// After fetching, tracks array will be updated and updateTracks will be called
+				// So we don't need to manually update here
+				isLoadingMore = false;
+			} catch (error) {
+				console.error('Error loading more tracks:', error);
+				isLoadingMore = false;
+			}
+			return;
+		}
+		
+		// Just render more from existing tracks
+		if (currentTracks.length <= 100 && !onLoadMore) return;
+		if (renderedCount >= currentTracks.length) {
+			// If we've rendered all tracks and no API loading, we're done
+			if (!onLoadMore) {
+				allRendered = true;
+				return;
+			}
+			// If we have onLoadMore but haven't triggered it yet, trigger it now
+			if (onLoadMore && !isLoadingMore) {
+				isLoadingMore = true;
+				try {
+					await onLoadMore();
+					isLoadingMore = false;
+				} catch (error) {
+					console.error('Error loading more tracks:', error);
+					isLoadingMore = false;
+				}
+			}
+			return;
+		}
+		
+		isLoading = true;
+		const nextBatchEnd = Math.min(renderedCount + BATCH_SIZE, currentTracks.length);
+		
+		// Use requestAnimationFrame for smooth rendering
+		requestAnimationFrame(() => {
+			renderBatch(renderedCount, nextBatchEnd, true);
+			isLoading = false;
+			
+			// Move sentinel to end if using progressive loading
+			if ((currentTracks.length > 100 || onLoadMore) && !allRendered) {
+				const sentinel = tbody.querySelector('.load-more-sentinel');
+				if (sentinel) {
+					tbody.appendChild(sentinel);
+				}
+			}
+		});
+	}
+	
+	// Function to update tracks array and continue rendering
+	function updateTracks(newTracks) {
+		const savedPos = saveScrollPosition();
+		const oldLength = currentTracks.length;
+		currentTracks = newTracks;
+		
+		// If we have more tracks now, continue rendering from where we left off
+		if (currentTracks.length > oldLength) {
+			allRendered = false;
+			isLoadingMore = false; // Reset loading flag so we can continue loading
+			
+			// Render more tracks - append only new ones
+			if (renderedCount < currentTracks.length) {
+				const nextBatchEnd = Math.min(renderedCount + BATCH_SIZE, currentTracks.length);
+				renderBatch(renderedCount, nextBatchEnd, true);
+			}
+			
+			// Always ensure sentinel is present and observed if we might have more tracks
+			const hasMore = onLoadMore; // If onLoadMore exists, assume there might be more
+			if (!allRendered || hasMore) {
+				let sentinel = tbody.querySelector('.load-more-sentinel');
+				if (!sentinel) {
+					sentinel = el('tr', { class: 'load-more-sentinel', style: 'height: 1px; visibility: hidden;' }, [
+						el('td', { colspan: '5' }, [])
+					]);
+					tbody.appendChild(sentinel);
+				}
+				
+				// Ensure sentinel is at the end
+				if (sentinel.parentNode) {
+					sentinel.parentNode.appendChild(sentinel);
+				}
+				
+				// Re-observe the sentinel if observer exists
+				if (sentinelObserver) {
+					sentinelObserver.disconnect();
+				}
+				// Create new observer
+				sentinelObserver = new IntersectionObserver((entries) => {
+					entries.forEach(entry => {
+						if (entry.isIntersecting && !allRendered && !isLoadingMore) {
+							loadMoreTracks();
+						}
+					});
+				}, {
+					root: null,
+					rootMargin: '2000px',
+					threshold: 0.01
+				});
+				sentinelObserver.observe(sentinel);
+			}
+			
+			// Restore scroll position after DOM updates
+			restoreScrollPosition(savedPos);
+		}
+	}
+	
+	function createTrackRow(t, idx, currentTrackId, playlistId, isAlbumView, onSelect) {
 			const mins = Math.floor((t.durationMs || 0) / 60000);
 			const secs = Math.floor(((t.durationMs || 0) % 60000) / 1000).toString().padStart(2, '0');
 			const isPlaying = t.id === currentTrackId;
@@ -579,8 +948,18 @@ function tracksList(title, tracks, onSelect, playlistId = null, isAlbumView = fa
 		
 		// Album art cell
 		const artCell = el('td', { class: 'track-art-cell' });
-		if (t.image) {
+		// Check if image URL is valid (not empty, not just whitespace, not ending with '/')
+		const isValidImage = t.image && t.image.trim() !== '' && !t.image.endsWith('/') && t.image !== window.location.href;
+		
+		if (isValidImage) {
 			const img = el('img', { class: 'track-art', src: t.image, alt: t.title || 'Track' });
+			// Handle image load error - replace with placeholder if image fails to load
+			img.addEventListener('error', () => {
+				img.remove();
+				const placeholder = el('div', { class: 'track-art-placeholder' });
+				placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+				artCell.appendChild(placeholder);
+			});
 			artCell.appendChild(img);
 		} else {
 			const placeholder = el('div', { class: 'track-art-placeholder' });
@@ -640,17 +1019,67 @@ function tracksList(title, tracks, onSelect, playlistId = null, isAlbumView = fa
 			});
 			
 			return row;
-		}));
 	}
 	
 	// Initial render
 	renderTracks();
 	
-	// Re-render when track changes
-	window.addEventListener('trackChanged', renderTracks);
+	// Create a sentinel element for intersection observer
+	const sentinel = el('tr', { class: 'load-more-sentinel', style: 'height: 1px; visibility: hidden;' }, [
+		el('td', { colspan: '5' }, [])
+	]);
+	
+	// Add scroll listener for progressive loading (for large lists or when using API loading)
+	if (currentTracks.length > 100 || onLoadMore) {
+		tbody.appendChild(sentinel);
+		
+		// Use IntersectionObserver for reliable loading trigger
+		sentinelObserver = new IntersectionObserver((entries) => {
+			entries.forEach(entry => {
+				if (entry.isIntersecting && !allRendered && !isLoadingMore) {
+					loadMoreTracks();
+				}
+			});
+		}, {
+			root: null,
+			rootMargin: '2000px',
+			threshold: 0.01
+		});
+		
+		sentinelObserver.observe(sentinel);
+		
+		// Clean up sentinel when all loaded and no more API data
+		const checkComplete = setInterval(() => {
+			if (allRendered && !onLoadMore) {
+				sentinel.remove();
+				if (sentinelObserver) {
+					sentinelObserver.disconnect();
+					sentinelObserver = null;
+				}
+				clearInterval(checkComplete);
+			}
+		}, 500);
+	}
+	
+	// Re-render when track changes (only update rendered rows)
+	const updatePlayingState = () => {
+		const currentTrack = window.player?.getCurrentTrack?.();
+		const currentTrackId = currentTrack ? currentTrack.id : null;
+		const rows = tbody.querySelectorAll('tr');
+		rows.forEach(row => {
+			const trackId = currentTracks[Array.from(tbody.children).indexOf(row)]?.id;
+			if (trackId === currentTrackId) {
+				row.classList.add('playing');
+			} else {
+				row.classList.remove('playing');
+			}
+		});
+	};
+	
+	window.addEventListener('trackChanged', updatePlayingState);
 	
 	// Re-render when favorites change
-	window.addEventListener('favoriteChanged', renderTracks);
+	window.addEventListener('favoriteChanged', () => renderTracks(true));
 	
 	// Build table headers based on view type
 	const headers = [
@@ -674,7 +1103,17 @@ function tracksList(title, tracks, onSelect, playlistId = null, isAlbumView = fa
 		table.classList.add('tracks-album-view');
 	}
 	
-	return el('div', { class: 'tracks-section' }, [table]);
+	const container = el('div', { class: 'tracks-section' }, [table]);
+	
+	// For library page, return object with update function
+	// For other pages (album, playlist, etc.), return container directly for backwards compatibility
+	if (onLoadMore) {
+		// Store update function for library page
+		container._updateTracks = updateTracks;
+		return container;
+	}
+	
+	return container;
 }
 
 async function renderAlbumDetail(id) {
@@ -696,9 +1135,11 @@ async function renderAlbumDetail(id) {
 	const allTracks = filterHiddenSongs(tracks.tracks);
 	const visibleTracks = allTracks.filter(t => !t.isHidden);
 	
+	let filteredTracks = allTracks;
+	
 	const onSelect = (i) => { 
-		// Find the actual index in visibleTracks based on the track at position i in allTracks
-		const track = allTracks[i];
+		// Find the actual index in visibleTracks based on the track at position i in filteredTracks
+		const track = filteredTracks[i];
 		const visibleIndex = visibleTracks.findIndex(t => t.id === track.id);
 		if (visibleIndex >= 0) {
 			window.player.loadQueue(visibleTracks); 
@@ -810,7 +1251,84 @@ async function renderAlbumDetail(id) {
 		});
 	}
 	
-		app.replaceChildren(el('div', {}, [hero, tracksList('', allTracks, onSelect, null, true)]));
+	// Search bar with expandable button
+	const searchBar = el('div', { class: 'search-bar-container' });
+	const searchButton = el('button', { class: 'search-button-toggle' });
+	const searchIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	searchIcon.setAttribute('viewBox', '0 0 24 24');
+	searchIcon.setAttribute('fill', 'currentColor');
+	const searchIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	searchIconPath.setAttribute('d', 'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z');
+	searchIcon.appendChild(searchIconPath);
+	searchButton.appendChild(searchIcon);
+	
+	const searchInputWrapper = el('div', { class: 'search-input-wrapper-collapsed' });
+	const searchInput = el('input', { type: 'text', class: 'search-bar', placeholder: 'Search by title or artist...' });
+	searchInputWrapper.appendChild(searchInput);
+	
+	const tracksContainer = el('div', {});
+	
+	function updateTracksDisplay() {
+		tracksContainer.replaceChildren(tracksList('', filteredTracks, (i) => {
+			// Find the actual index in visibleTracks based on the track at position i in filteredTracks
+			const track = filteredTracks[i];
+			const visibleIndex = visibleTracks.findIndex(t => t.id === track.id);
+			if (visibleIndex >= 0) {
+				window.player.loadQueue(visibleTracks); 
+				window.player.playIndex(visibleIndex);
+			}
+		}, null, true));
+	}
+	
+	searchInput.addEventListener('input', (e) => {
+		const query = e.target.value.toLowerCase();
+		filteredTracks = query ? allTracks.filter(t => 
+			(t.title || '').toLowerCase().includes(query) || 
+			(t.artist || '').toLowerCase().includes(query)
+		) : allTracks;
+		updateTracksDisplay();
+	});
+	
+	let isExpanded = false;
+	searchButton.addEventListener('click', (e) => {
+		e.stopPropagation();
+		isExpanded = !isExpanded;
+		if (isExpanded) {
+			searchInputWrapper.classList.remove('search-input-wrapper-collapsed');
+			searchInputWrapper.classList.add('search-input-wrapper-expanded');
+			setTimeout(() => searchInput.focus(), 100);
+		} else {
+			searchInputWrapper.classList.remove('search-input-wrapper-expanded');
+			searchInputWrapper.classList.add('search-input-wrapper-collapsed');
+			searchInput.value = '';
+			filteredTracks = allTracks;
+			updateTracksDisplay();
+		}
+	});
+	
+	// Close search when clicking outside
+	const handleClickOutside = (e) => {
+		if (isExpanded && !searchBar.contains(e.target)) {
+			isExpanded = false;
+			searchInputWrapper.classList.remove('search-input-wrapper-expanded');
+			searchInputWrapper.classList.add('search-input-wrapper-collapsed');
+			searchInput.value = '';
+			filteredTracks = allTracks;
+			updateTracksDisplay();
+		}
+	};
+	
+	searchInput.addEventListener('click', (e) => {
+		e.stopPropagation();
+	});
+	
+	document.addEventListener('click', handleClickOutside);
+	
+	searchBar.appendChild(searchButton);
+	searchBar.appendChild(searchInputWrapper);
+	updateTracksDisplay();
+	
+		app.replaceChildren(el('div', {}, [hero, searchBar, tracksContainer]));
 	};
 	
 	// Listen for hidden songs changes to re-render instantly
@@ -845,9 +1363,11 @@ async function renderPlaylistDetail(id) {
 	const allTracks = filterHiddenSongs(res.tracks);
 	const visibleTracks = allTracks.filter(t => !t.isHidden);
 	
+	let filteredTracks = allTracks;
+	
 	const onSelect = (i) => {
-		// Find the actual index in visibleTracks based on the track at position i in allTracks
-		const track = allTracks[i];
+		// Find the actual index in visibleTracks based on the track at position i in filteredTracks
+		const track = filteredTracks[i];
 		const visibleIndex = visibleTracks.findIndex(t => t.id === track.id);
 		if (visibleIndex >= 0) {
 			window.player.loadQueue(visibleTracks); 
@@ -1019,7 +1539,84 @@ async function renderPlaylistDetail(id) {
 		});
 	}
 	
-		app.replaceChildren(el('div', {}, [hero, tracksList('', allTracks, onSelect, id)]));
+	// Search bar with expandable button
+	const searchBar = el('div', { class: 'search-bar-container' });
+	const searchButton = el('button', { class: 'search-button-toggle' });
+	const searchIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	searchIcon.setAttribute('viewBox', '0 0 24 24');
+	searchIcon.setAttribute('fill', 'currentColor');
+	const searchIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	searchIconPath.setAttribute('d', 'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z');
+	searchIcon.appendChild(searchIconPath);
+	searchButton.appendChild(searchIcon);
+	
+	const searchInputWrapper = el('div', { class: 'search-input-wrapper-collapsed' });
+	const searchInput = el('input', { type: 'text', class: 'search-bar', placeholder: 'Search by title or artist...' });
+	searchInputWrapper.appendChild(searchInput);
+	
+	const tracksContainer = el('div', {});
+	
+	function updateTracksDisplay() {
+		tracksContainer.replaceChildren(tracksList('', filteredTracks, (i) => {
+			// Find the actual index in visibleTracks based on the track at position i in filteredTracks
+			const track = filteredTracks[i];
+			const visibleIndex = visibleTracks.findIndex(t => t.id === track.id);
+			if (visibleIndex >= 0) {
+				window.player.loadQueue(visibleTracks); 
+				window.player.playIndex(visibleIndex);
+			}
+		}, id));
+	}
+	
+	searchInput.addEventListener('input', (e) => {
+		const query = e.target.value.toLowerCase();
+		filteredTracks = query ? allTracks.filter(t => 
+			(t.title || '').toLowerCase().includes(query) || 
+			(t.artist || '').toLowerCase().includes(query)
+		) : allTracks;
+		updateTracksDisplay();
+	});
+	
+	let isExpanded = false;
+	searchButton.addEventListener('click', (e) => {
+		e.stopPropagation();
+		isExpanded = !isExpanded;
+		if (isExpanded) {
+			searchInputWrapper.classList.remove('search-input-wrapper-collapsed');
+			searchInputWrapper.classList.add('search-input-wrapper-expanded');
+			setTimeout(() => searchInput.focus(), 100);
+		} else {
+			searchInputWrapper.classList.remove('search-input-wrapper-expanded');
+			searchInputWrapper.classList.add('search-input-wrapper-collapsed');
+			searchInput.value = '';
+			filteredTracks = allTracks;
+			updateTracksDisplay();
+		}
+	});
+	
+	// Close search when clicking outside
+	const handleClickOutside = (e) => {
+		if (isExpanded && !searchBar.contains(e.target)) {
+			isExpanded = false;
+			searchInputWrapper.classList.remove('search-input-wrapper-expanded');
+			searchInputWrapper.classList.add('search-input-wrapper-collapsed');
+			searchInput.value = '';
+			filteredTracks = allTracks;
+			updateTracksDisplay();
+		}
+	};
+	
+	searchInput.addEventListener('click', (e) => {
+		e.stopPropagation();
+	});
+	
+	document.addEventListener('click', handleClickOutside);
+	
+	searchBar.appendChild(searchButton);
+	searchBar.appendChild(searchInputWrapper);
+	updateTracksDisplay();
+	
+		app.replaceChildren(el('div', {}, [hero, searchBar, tracksContainer]));
 	};
 	
 	// Listen for hidden songs changes to re-render instantly
@@ -1114,38 +1711,13 @@ async function renderArtistDetail(id) {
 	
 	// Add albums section if any albums exist
 	if (albums && albums.length > 0) {
-		const albumsGrid = el('div', { class: 'home-section', style: 'padding: 0 32px 32px;' }, [
-			el('div', { class: 'section-header' }, [
-				el('h2', {}, ['Albums'])
-			]),
-			el('div', { class: 'grid' }, albums.map((album) => {
-				const imgWrapper = el('div', { class: 'card-image-wrapper' });
-				imgWrapper.setAttribute('data-type', 'album');
-				
-				const img = el('img', { src: album.image || '', alt: album.title });
-				const playBtn = createPlayButton(() => {
+		const { grid: albumsGrid } = createVirtualGrid(
+			albums,
+			(album) => {
+				const card = createCardElement(album, (album) => {
 					location.hash = `album/${album.id}`;
-				});
+				}, 'album');
 				
-				imgWrapper.appendChild(img);
-				imgWrapper.appendChild(playBtn);
-				handleImageError(imgWrapper, img);
-				
-				const card = el('div', { class: 'card' }, [
-					imgWrapper,
-					el('div', { class: 'meta' }, [
-						el('div', { class: 'title' }, [album.title || 'Untitled']),
-						el('div', { class: 'subtitle' }, [album.subtitle || ''])
-					])
-				]);
-				
-				card.addEventListener('click', (e) => {
-					if (!e.target.closest('.card-play-btn')) {
-						location.hash = `album/${album.id}`;
-					}
-				});
-				
-				// Add album context menu
 				card.addEventListener('contextmenu', async (e) => {
 					e.preventDefault();
 					if (window.albumContextMenu) {
@@ -1154,9 +1726,18 @@ async function renderArtistDetail(id) {
 				});
 				
 				return card;
-			}))
+			},
+			{ initialBatch: 20, batchSize: 20 }
+		);
+		
+		const albumsSection = el('div', { class: 'home-section', style: 'padding: 0 32px 32px;' }, [
+			el('div', { class: 'section-header' }, [
+				el('h2', {}, ['Albums'])
+			]),
+			albumsGrid
 		]);
-		content.push(albumsGrid);
+		
+		content.push(albumsSection);
 	}
 	
 	// Add tracks section with header
@@ -1284,43 +1865,20 @@ async function renderSearch(initialQuery = '') {
 			sections.push(
 				el('div', { class: 'search-section' }, [
 					el('h2', { class: 'search-section-title' }, ['Songs']),
-					tracksList('', songs.slice(0, 10), onSelect)
+					tracksList('', songs, onSelect)
 				])
 			);
 		}
 		
 		// Albums section
 		if (albums.length > 0) {
-			sections.push(
-				el('div', { class: 'search-section' }, [
-					el('h2', { class: 'search-section-title' }, ['Albums']),
-					el('div', { class: 'search-grid' }, albums.slice(0, 8).map((album) => {
-						const imgWrapper = el('div', { class: 'card-image-wrapper' });
-						imgWrapper.setAttribute('data-type', 'album');
-						
-						const img = el('img', { src: album.image || '', alt: album.title });
-						const playBtn = createPlayButton(() => {
-							location.hash = `album/${album.id}`;
-						});
-						
-						imgWrapper.appendChild(img);
-						imgWrapper.appendChild(playBtn);
-						handleImageError(imgWrapper, img);
-						
-						const card = el('div', { class: 'card' }, [
-							imgWrapper,
-							el('div', { class: 'meta' }, [
-								el('div', { class: 'title' }, [album.title || 'Untitled']),
-								el('div', { class: 'subtitle' }, [album.subtitle || ''])
-		])
-	]);
-					card.addEventListener('click', (e) => {
-						if (!e.target.closest('.card-play-btn')) {
-							location.hash = `album/${album.id}`;
-						}
-					});
+			const { grid: albumsGrid } = createVirtualGrid(
+				albums,
+				(album) => {
+					const card = createCardElement(album, (album) => {
+						location.hash = `album/${album.id}`;
+					}, 'album');
 					
-					// Add album context menu
 					card.addEventListener('contextmenu', async (e) => {
 						e.preventDefault();
 						if (window.albumContextMenu) {
@@ -1329,77 +1887,65 @@ async function renderSearch(initialQuery = '') {
 					});
 					
 					return card;
-				}))
-			])
-		);
-	}
+				},
+				{ initialBatch: 20, batchSize: 20, containerClass: 'search-grid' }
+			);
+			
+			sections.push(
+				el('div', { class: 'search-section' }, [
+					el('h2', { class: 'search-section-title' }, ['Albums']),
+					albumsGrid
+				])
+			);
+		}
 	
 	// Artists section
 		if (artists.length > 0) {
+			const { grid: artistsGrid } = createVirtualGrid(
+				artists,
+				(artist) => {
+					const card = createCardElement(artist, (artist) => {
+						location.hash = `artist/${artist.id}`;
+					}, 'artist');
+					
+					card.addEventListener('contextmenu', (e) => {
+						e.preventDefault();
+						if (window.artistContextMenu) {
+							window.artistContextMenu.show(e.clientX, e.clientY, artist);
+						}
+					});
+					
+					return card;
+				},
+				{ initialBatch: 20, batchSize: 20, containerClass: 'search-grid' }
+			);
+			
 			sections.push(
 				el('div', { class: 'search-section' }, [
 					el('h2', { class: 'search-section-title' }, ['Artists']),
-					el('div', { class: 'search-grid' }, artists.slice(0, 8).map((artist) => {
-						const imgWrapper = el('div', { class: 'card-image-wrapper' });
-						imgWrapper.setAttribute('data-type', 'artist');
-						
-						const img = el('img', { src: artist.image || '', alt: artist.title });
-						const playBtn = createPlayButton(() => {
-							location.hash = `artist/${artist.id}`;
-						});
-						
-						imgWrapper.appendChild(img);
-						imgWrapper.appendChild(playBtn);
-						handleImageError(imgWrapper, img);
-						
-						const card = el('div', { class: 'card' }, [
-							imgWrapper,
-							el('div', { class: 'meta' }, [
-								el('div', { class: 'title' }, [artist.title || 'Untitled'])
-							])
-						]);
-						card.addEventListener('click', (e) => {
-							if (!e.target.closest('.card-play-btn')) {
-								location.hash = `artist/${artist.id}`;
-							}
-						});
-						return card;
-					}))
+					artistsGrid
 				])
 			);
 		}
 		
 		// Playlists section
 		if (playlists.length > 0) {
+			const { grid: playlistsGrid } = createVirtualGrid(
+				playlists,
+				(playlist) => {
+					const card = createCardElement(playlist, (playlist) => {
+						location.hash = `playlist/${playlist.id}`;
+					}, 'playlist');
+					
+					return card;
+				},
+				{ initialBatch: 20, batchSize: 20, containerClass: 'search-grid' }
+			);
+			
 			sections.push(
 				el('div', { class: 'search-section' }, [
 					el('h2', { class: 'search-section-title' }, ['Playlists']),
-					el('div', { class: 'search-grid' }, playlists.slice(0, 8).map((playlist) => {
-						const imgWrapper = el('div', { class: 'card-image-wrapper' });
-						imgWrapper.setAttribute('data-type', 'playlist');
-						
-						const img = el('img', { src: playlist.image || '', alt: playlist.title });
-						const playBtn = createPlayButton(() => {
-							location.hash = `playlist/${playlist.id}`;
-						});
-						
-						imgWrapper.appendChild(img);
-						imgWrapper.appendChild(playBtn);
-						handleImageError(imgWrapper, img);
-						
-						const card = el('div', { class: 'card' }, [
-							imgWrapper,
-							el('div', { class: 'meta' }, [
-								el('div', { class: 'title' }, [playlist.title || 'Untitled'])
-							])
-						]);
-						card.addEventListener('click', (e) => {
-							if (!e.target.closest('.card-play-btn')) {
-								location.hash = `playlist/${playlist.id}`;
-							}
-						});
-						return card;
-					}))
+					playlistsGrid
 				])
 			);
 		}
@@ -1490,9 +2036,21 @@ async function renderLikedSongs() {
 	hero.appendChild(heartIcon);
 	hero.appendChild(heroMeta);
 	
-	// Search bar
+	// Search bar with expandable button
 	const searchBar = el('div', { class: 'search-bar-container' });
+	const searchButton = el('button', { class: 'search-button-toggle' });
+	const searchIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	searchIcon.setAttribute('viewBox', '0 0 24 24');
+	searchIcon.setAttribute('fill', 'currentColor');
+	const searchIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	searchIconPath.setAttribute('d', 'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z');
+	searchIcon.appendChild(searchIconPath);
+	searchButton.appendChild(searchIcon);
+	
+	const searchInputWrapper = el('div', { class: 'search-input-wrapper-collapsed' });
 	const searchInput = el('input', { type: 'text', class: 'search-bar', placeholder: 'Search by title or artist...' });
+	searchInputWrapper.appendChild(searchInput);
+	
 	const tracksContainer = el('div', {});
 	
 	function updateTracksDisplay() {
@@ -1511,7 +2069,43 @@ async function renderLikedSongs() {
 		updateTracksDisplay();
 	});
 	
-	searchBar.appendChild(searchInput);
+	let isExpanded = false;
+	searchButton.addEventListener('click', (e) => {
+		e.stopPropagation();
+		isExpanded = !isExpanded;
+		if (isExpanded) {
+			searchInputWrapper.classList.remove('search-input-wrapper-collapsed');
+			searchInputWrapper.classList.add('search-input-wrapper-expanded');
+			setTimeout(() => searchInput.focus(), 100);
+		} else {
+			searchInputWrapper.classList.remove('search-input-wrapper-expanded');
+			searchInputWrapper.classList.add('search-input-wrapper-collapsed');
+			searchInput.value = '';
+			filteredTracks = allTracks;
+			updateTracksDisplay();
+		}
+	});
+	
+	// Close search when clicking outside
+	const handleClickOutside = (e) => {
+		if (isExpanded && !searchBar.contains(e.target)) {
+			isExpanded = false;
+			searchInputWrapper.classList.remove('search-input-wrapper-expanded');
+			searchInputWrapper.classList.add('search-input-wrapper-collapsed');
+			searchInput.value = '';
+			filteredTracks = allTracks;
+			updateTracksDisplay();
+		}
+	};
+	
+	searchInput.addEventListener('click', (e) => {
+		e.stopPropagation();
+	});
+	
+	document.addEventListener('click', handleClickOutside);
+	
+	searchBar.appendChild(searchButton);
+	searchBar.appendChild(searchInputWrapper);
 	updateTracksDisplay();
 	
 	app.replaceChildren(el('div', {}, [hero, searchBar, tracksContainer]));
@@ -1608,35 +2202,263 @@ async function renderLibrary() {
 		});
 	}
 	
-	// Load and filter function
-	async function loadLibrary() {
-		resultsContainer.replaceChildren(el('div', { class: 'library-loading' }, ['Loading...']));
+	// Progressive fetching state
+	let libraryFetchState = {
+		startIndex: 0,
+		limit: 100,
+		isLoading: false,
+		hasMore: true,
+		currentLoadType: null
+	};
+	
+	// Separate fetch states for "all" tab (one per type)
+	let allTabFetchStates = {
+		albums: { startIndex: 0, limit: 100, isLoading: false, hasMore: true },
+		artists: { startIndex: 0, limit: 100, isLoading: false, hasMore: true },
+		playlists: { startIndex: 0, limit: 100, isLoading: false, hasMore: true },
+		songs: { startIndex: 0, limit: 100, isLoading: false, hasMore: true }
+	};
+	
+	// Store grid update functions so we can update them instead of recreating
+	let gridUpdateFunctions = {
+		albums: null,
+		artists: null,
+		playlists: null
+	};
+	
+	// Store tracksList update function and container
+	let tracksListUpdate = null;
+	let tracksListContainer = null;
+	let tracksListTbody = null;
+	
+	// Load and filter function with progressive fetching
+	async function loadLibrary(reset = false) {
+		if (reset) {
+			libraryFetchState = {
+				startIndex: 0,
+				limit: 100,
+				isLoading: false,
+				hasMore: true,
+				currentLoadType: null
+			};
+			// Reset all tab fetch states too
+			allTabFetchStates = {
+				albums: { startIndex: 0, limit: 100, isLoading: false, hasMore: true },
+				artists: { startIndex: 0, limit: 100, isLoading: false, hasMore: true },
+				playlists: { startIndex: 0, limit: 100, isLoading: false, hasMore: true },
+				songs: { startIndex: 0, limit: 100, isLoading: false, hasMore: true }
+			};
+			allData = { albums: [], artists: [], playlists: [], songs: [] };
+			totalCounts = { albums: 0, artists: 0, playlists: 0, songs: 0 };
+			// Reset tracksList references
+			tracksListUpdate = null;
+			tracksListContainer = null;
+			tracksListTbody = null;
+			resultsContainer.replaceChildren(el('div', { class: 'library-loading' }, ['Loading...']));
+		}
 		
 		// For favourites, we need to load all types to filter them
 		const loadType = currentType === 'favourites' ? 'all' : currentType;
-		const res = await window.api.getLibrary({ type: loadType, sortBy: currentSort, limit: 10000 });
-		if (!res.ok) {
-			resultsContainer.replaceChildren(el('div', { class: 'library-error' }, [res.error || 'Failed to load library']));
+		
+		// Don't fetch if already loading or if type changed
+		if (libraryFetchState.isLoading) return;
+		if (libraryFetchState.currentLoadType !== loadType && !reset) {
+			// Type changed, reset and reload
+			await loadLibrary(true);
 			return;
 		}
 		
-		allData = res;
-		console.log('Library data loaded:', {
-			albums: allData.albums.length,
-			playlists: allData.playlists.length,
-			favoritedAlbums: allData.albums.filter(a => a.isFavorite).length,
-			favoritedPlaylists: allData.playlists.filter(p => p.isFavorite).length
-		});
+		libraryFetchState.isLoading = true;
+		libraryFetchState.currentLoadType = loadType;
 		
-		// Add owner names to playlists from the allUsers list
-		allData.playlists.forEach(playlist => {
-			if (playlist.ownerId) {
-				const owner = allUsers.find(u => u.id === playlist.ownerId);
-				playlist.ownerName = owner ? owner.name : '';
+		// For initial load, show loading indicator
+		if (reset || libraryFetchState.startIndex === 0) {
+			if (resultsContainer.children.length === 0 || resultsContainer.querySelector('.library-loading')) {
+				resultsContainer.replaceChildren(el('div', { class: 'library-loading' }, ['Loading...']));
 			}
-		});
+		}
 		
-		filterAndDisplay();
+		try {
+			const res = await window.api.getLibrary({ 
+				type: loadType, 
+				sortBy: currentSort, 
+				limit: libraryFetchState.limit,
+				startIndex: libraryFetchState.startIndex 
+			});
+			
+			if (!res.ok) {
+				if (reset) {
+					resultsContainer.replaceChildren(el('div', { class: 'library-error' }, [res.error || 'Failed to load library']));
+				}
+				libraryFetchState.isLoading = false;
+				return;
+			}
+			
+			// Merge new data with existing data
+			if (reset) {
+				allData = res;
+				totalCounts = res.totalCounts || { albums: 0, artists: 0, playlists: 0, songs: 0 };
+				
+				// If loading "all" type, initialize fetch states with hasMore based on counts
+				if (loadType === 'all') {
+					allTabFetchStates.albums.hasMore = res.albums.length >= libraryFetchState.limit;
+					allTabFetchStates.artists.hasMore = res.artists.length >= libraryFetchState.limit;
+					allTabFetchStates.playlists.hasMore = res.playlists.length >= libraryFetchState.limit;
+					allTabFetchStates.songs.hasMore = res.songs.length >= libraryFetchState.limit;
+					// Set startIndex for each type based on what we received
+					allTabFetchStates.albums.startIndex = res.albums.length;
+					allTabFetchStates.artists.startIndex = res.artists.length;
+					allTabFetchStates.playlists.startIndex = res.playlists.length;
+					allTabFetchStates.songs.startIndex = res.songs.length;
+				}
+			} else {
+				// Append new items, avoiding duplicates
+				const existingIds = {
+					albums: new Set(allData.albums.map(a => a.id)),
+					artists: new Set(allData.artists.map(a => a.id)),
+					playlists: new Set(allData.playlists.map(p => p.id)),
+					songs: new Set(allData.songs.map(s => s.id))
+				};
+				
+				allData.albums = allData.albums.concat(res.albums.filter(a => !existingIds.albums.has(a.id)));
+				allData.artists = allData.artists.concat(res.artists.filter(a => !existingIds.artists.has(a.id)));
+				allData.playlists = allData.playlists.concat(res.playlists.filter(p => !existingIds.playlists.has(p.id)));
+				allData.songs = allData.songs.concat(res.songs.filter(s => !existingIds.songs.has(s.id)));
+				
+				// Update total counts if provided (use max to handle cases where totals might change)
+				if (res.totalCounts) {
+					totalCounts.albums = Math.max(totalCounts.albums, res.totalCounts.albums || 0);
+					totalCounts.artists = Math.max(totalCounts.artists, res.totalCounts.artists || 0);
+					totalCounts.playlists = Math.max(totalCounts.playlists, res.totalCounts.playlists || 0);
+					totalCounts.songs = Math.max(totalCounts.songs, res.totalCounts.songs || 0);
+				}
+			}
+			
+			// Check if we got fewer items than requested (means no more data)
+			const totalReceived = res.albums.length + res.artists.length + res.playlists.length + res.songs.length;
+			if (totalReceived < libraryFetchState.limit) {
+				libraryFetchState.hasMore = false;
+			}
+			
+			// Update fetch state
+			libraryFetchState.startIndex += libraryFetchState.limit;
+			
+			// Add owner names to playlists from the allUsers list
+			allData.playlists.forEach(playlist => {
+				if (playlist.ownerId && !playlist.ownerName) {
+					const owner = allUsers.find(u => u.id === playlist.ownerId);
+					playlist.ownerName = owner ? owner.name : '';
+				}
+			});
+			
+			console.log('Library data loaded:', {
+				startIndex: libraryFetchState.startIndex,
+				albums: allData.albums.length,
+				playlists: allData.playlists.length,
+				hasMore: libraryFetchState.hasMore
+			});
+			
+			// Update existing tracksList if songs were loaded and we're on songs tab
+			if (loadType === 'songs' && tracksListUpdate && tracksListContainer && currentType === 'songs' && !reset) {
+				const filteredSongs = allData.songs;
+				tracksListUpdate(filteredSongs);
+				// Update the count in the title
+				const titleEl = tracksListContainer.querySelector('.library-section-title');
+				if (titleEl) {
+					const songCount = totalCounts.songs > 0 ? totalCounts.songs : filteredSongs.length;
+					titleEl.textContent = `Songs (${songCount})`;
+				}
+				// Don't call filterAndDisplay - we've updated in place
+				return;
+			}
+			
+			// For other types or initial load, use filterAndDisplay
+			filterAndDisplay();
+		} catch (error) {
+			console.error('Error loading library:', error);
+			if (reset) {
+				resultsContainer.replaceChildren(el('div', { class: 'library-error' }, ['Failed to load library']));
+			}
+		} finally {
+			libraryFetchState.isLoading = false;
+		}
+	}
+	
+	// Function to load more library data when scrolling
+	async function loadMoreLibraryData(type = null) {
+		// If type is specified and we're on "all" tab, load that specific type
+		if (currentType === 'all' && type) {
+			await loadMoreLibraryDataForType(type);
+			return;
+		}
+		
+		// Otherwise use the shared fetch state
+		if (!libraryFetchState.hasMore || libraryFetchState.isLoading) return;
+		await loadLibrary(false);
+	}
+	
+	// Load more data for a specific type when on "all" tab
+	async function loadMoreLibraryDataForType(type) {
+		const state = allTabFetchStates[type];
+		if (!state || !state.hasMore || state.isLoading) return;
+		
+		state.isLoading = true;
+		try {
+			const res = await window.api.getLibrary({ 
+				type: type, 
+				sortBy: currentSort, 
+				limit: state.limit,
+				startIndex: state.startIndex 
+			});
+			
+			if (!res.ok) {
+				state.isLoading = false;
+				return;
+			}
+			
+			// Merge new data with existing data
+			const existingIds = new Set(allData[type].map(item => item.id));
+			allData[type] = allData[type].concat(res[type].filter(item => !existingIds.has(item.id)));
+			
+			// Update total counts
+			if (res.totalCounts && res.totalCounts[type]) {
+				totalCounts[type] = Math.max(totalCounts[type], res.totalCounts[type]);
+			}
+			
+			// Check if we got fewer items than requested (means no more data)
+			if (res[type].length < state.limit) {
+				state.hasMore = false;
+			}
+			
+			// Update fetch state
+			state.startIndex += state.limit;
+			
+			// Add owner names to playlists if needed
+			if (type === 'playlists') {
+				res.playlists.forEach(playlist => {
+					if (playlist.ownerId && !playlist.ownerName) {
+						const owner = allUsers.find(u => u.id === playlist.ownerId);
+						playlist.ownerName = owner ? owner.name : '';
+					}
+				});
+			}
+			
+			// Re-render to show new items
+			// Instead of calling filterAndDisplay which recreates everything,
+			// update the specific grid that was loaded
+			if (gridUpdateFunctions[type]) {
+				// Update the grid with new items
+				const filteredItems = allData[type];
+				gridUpdateFunctions[type](filteredItems);
+			} else {
+				// Fallback to full re-render if grid update function not available
+				filterAndDisplay();
+			}
+		} catch (error) {
+			console.error(`Error loading more ${type}:`, error);
+		} finally {
+			state.isLoading = false;
+		}
 	}
 	
 	function filterAndDisplay() {
@@ -1696,50 +2518,43 @@ async function renderLibrary() {
 		
 		// If showing songs, use tracklist
 		const songs = items.filter(i => i.type === 'song');
-		if (songs.length > 0) {
+		if (songs.length > 0 || currentType === 'songs') {
 			const onSelect = (i) => { 
 				window.player.loadQueue(songs); 
 				window.player.playIndex(i); 
 			};
-			sections.push(
-				el('div', { class: 'library-section' }, [
-					el('h2', { class: 'library-section-title' }, [`Songs (${songs.length})`]),
-					tracksList('', songs, onSelect)
-				])
-			);
+			
+			// Use total count if available, otherwise use loaded count
+			const songCount = totalCounts.songs > 0 ? totalCounts.songs : songs.length;
+			
+			// If tracksList already exists, update it instead of recreating
+			if (tracksListUpdate && tracksListContainer && currentType === 'songs') {
+				tracksListUpdate(songs);
+				// Update the count in the title
+				const titleEl = tracksListContainer.querySelector('.library-section-title');
+				if (titleEl) {
+					titleEl.textContent = `Songs (${songCount})`;
+				}
+			} else {
+				const tracksListContainerEl = tracksList('', songs, onSelect, null, false, (currentType === 'songs') && libraryFetchState.hasMore ? loadMoreLibraryData : null);
+				tracksListUpdate = tracksListContainerEl._updateTracks;
+				tracksListContainer = el('div', { class: 'library-section' }, [
+					el('h2', { class: 'library-section-title' }, [`Songs (${songCount})`]),
+					tracksListContainerEl
+				]);
+				sections.push(tracksListContainer);
+			}
 		}
 		
 		// Albums grid
 		const albums = items.filter(i => i.type === 'album');
-		if (albums.length > 0) {
-			sections.push(
-				el('div', { class: 'library-section' }, [
-					el('h2', { class: 'library-section-title' }, [`Albums (${albums.length})`]),
-					el('div', { class: 'library-grid' }, albums.map((album) => {
-						const imgWrapper = el('div', { class: 'card-image-wrapper' });
-						imgWrapper.setAttribute('data-type', 'album');
-						
-						const img = el('img', { src: album.image || '', alt: album.title });
-						const playBtn = createPlayButton(() => {
-							location.hash = `album/${album.id}`;
-						});
-						
-						imgWrapper.appendChild(img);
-						imgWrapper.appendChild(playBtn);
-						handleImageError(imgWrapper, img);
-						
-						const card = el('div', { class: 'card' }, [
-							imgWrapper,
-							el('div', { class: 'meta' }, [
-								el('div', { class: 'title' }, [album.title || 'Untitled']),
-								el('div', { class: 'subtitle' }, [album.subtitle || ''])
-							])
-						]);
-					card.addEventListener('click', (e) => {
-						if (!e.target.closest('.card-play-btn')) {
-							location.hash = `album/${album.id}`;
-						}
-					});
+		if (albums.length > 0 || currentType === 'albums' || currentType === 'all') {
+			const { grid: albumsGrid, updateItems: updateAlbums } = createVirtualGrid(
+				albums,
+				(album) => {
+					const card = createCardElement(album, (album) => {
+						location.hash = `album/${album.id}`;
+					}, 'album');
 					
 					// Add album context menu
 					card.addEventListener('contextmenu', async (e) => {
@@ -1750,102 +2565,152 @@ async function renderLibrary() {
 					});
 					
 					return card;
-				}))
-			])
-		);
-	}
+				},
+				{ 
+					initialBatch: 40, 
+					batchSize: 40, 
+					containerClass: 'library-grid',
+					onLoadMore: (currentType === 'albums' || currentType === 'all') && (currentType === 'all' ? allTabFetchStates.albums.hasMore : libraryFetchState.hasMore) ? () => loadMoreLibraryData('albums') : null
+				}
+			);
+			
+			// Store update function for later use
+			gridUpdateFunctions.albums = updateAlbums;
+			
+			// Use total count if available, otherwise use loaded count
+			const albumCount = totalCounts.albums > 0 ? totalCounts.albums : albums.length;
+			
+			// Store update function for later use
+			if (albums.length === 0) {
+				// Create empty grid that will populate when data loads
+				sections.push(
+					el('div', { class: 'library-section' }, [
+						el('h2', { class: 'library-section-title' }, [`Albums (${albumCount})`]),
+						albumsGrid
+					])
+				);
+			} else {
+				sections.push(
+					el('div', { class: 'library-section' }, [
+						el('h2', { class: 'library-section-title' }, [`Albums (${albumCount})`]),
+						albumsGrid
+					])
+				);
+			}
+		}
 	
 	// Artists grid
 	const artists = items.filter(i => i.type === 'artist');
-		if (artists.length > 0) {
+		if (artists.length > 0 || currentType === 'artists' || currentType === 'all') {
+			const { grid: artistsGrid, updateItems: updateArtists } = createVirtualGrid(
+				artists,
+				(artist) => {
+					const card = createCardElement(artist, (artist) => {
+						location.hash = `artist/${artist.id}`;
+					}, 'artist');
+					
+					card.addEventListener('contextmenu', (e) => {
+						e.preventDefault();
+						if (window.artistContextMenu) {
+							window.artistContextMenu.show(e.clientX, e.clientY, artist);
+						}
+					});
+					
+					return card;
+				},
+				{ 
+					initialBatch: 40, 
+					batchSize: 40, 
+					containerClass: 'library-grid',
+					onLoadMore: (currentType === 'artists' || currentType === 'all') && (currentType === 'all' ? allTabFetchStates.artists.hasMore : libraryFetchState.hasMore) ? () => loadMoreLibraryData('artists') : null
+				}
+			);
+			
+			// Store update function for later use
+			gridUpdateFunctions.artists = updateArtists;
+			
+			// Use total count if available, otherwise use loaded count
+			const artistCount = totalCounts.artists > 0 ? totalCounts.artists : artists.length;
+			
 			sections.push(
 				el('div', { class: 'library-section' }, [
-					el('h2', { class: 'library-section-title' }, [`Artists (${artists.length})`]),
-					el('div', { class: 'library-grid' }, artists.map((artist) => {
-						const imgWrapper = el('div', { class: 'card-image-wrapper' });
-						imgWrapper.setAttribute('data-type', 'artist');
-						
-						const img = el('img', { src: artist.image || '', alt: artist.title });
-						const playBtn = createPlayButton(() => {
-							location.hash = `artist/${artist.id}`;
-						});
-						
-						imgWrapper.appendChild(img);
-						imgWrapper.appendChild(playBtn);
-						handleImageError(imgWrapper, img);
-						
-						const card = el('div', { class: 'card' }, [
-							imgWrapper,
-							el('div', { class: 'meta' }, [
-								el('div', { class: 'title' }, [artist.title || 'Untitled'])
-							])
-						]);
-						card.addEventListener('click', (e) => {
-							if (!e.target.closest('.card-play-btn')) {
-								location.hash = `artist/${artist.id}`;
-							}
-						});
-						return card;
-					}))
+					el('h2', { class: 'library-section-title' }, [`Artists (${artistCount})`]),
+					artistsGrid
 				])
 			);
 		}
 		
 		// Playlists grid
 		const playlists = items.filter(i => i.type === 'playlist');
-		if (playlists.length > 0) {
-			sections.push(
-				el('div', { class: 'library-section' }, [
-					el('h2', { class: 'library-section-title' }, [`Playlists (${playlists.length})`]),
-					el('div', { class: 'library-grid' }, playlists.map((playlist) => {
-						const imgWrapper = el('div', { class: 'card-image-wrapper' });
-						imgWrapper.setAttribute('data-type', 'playlist');
-						
-						const img = el('img', { src: playlist.image || '', alt: playlist.title });
-						const playBtn = createPlayButton(() => {
+		if (playlists.length > 0 || currentType === 'playlists' || currentType === 'all') {
+			const { grid: playlistsGrid, updateItems: updatePlaylists } = createVirtualGrid(
+				playlists,
+				(playlist) => {
+					const imgWrapper = el('div', { class: 'card-image-wrapper' });
+					imgWrapper.setAttribute('data-type', 'playlist');
+					
+					const img = el('img', { src: playlist.image || '', alt: playlist.title });
+					const playBtn = createPlayButton(() => {
+						location.hash = `playlist/${playlist.id}`;
+					});
+					
+					imgWrapper.appendChild(img);
+					imgWrapper.appendChild(playBtn);
+					
+					// Add pin indicator if playlist is pinned
+					if (isPinned(playlist.id)) {
+						const pinIndicator = el('div', { class: 'card-pin-indicator' });
+						const pinSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+						pinSvg.setAttribute('viewBox', '0 0 24 24');
+						pinSvg.setAttribute('fill', 'currentColor');
+						const pinPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+						pinPath.setAttribute('d', 'M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z');
+						pinSvg.appendChild(pinPath);
+						pinIndicator.appendChild(pinSvg);
+						imgWrapper.appendChild(pinIndicator);
+					}
+					
+					handleImageError(imgWrapper, img);
+					
+					const card = el('div', { class: 'card' }, [
+						imgWrapper,
+						el('div', { class: 'meta' }, [
+							el('div', { class: 'title' }, [playlist.title || 'Untitled'])
+						])
+					]);
+					card.addEventListener('click', (e) => {
+						if (!e.target.closest('.card-play-btn')) {
 							location.hash = `playlist/${playlist.id}`;
-						});
-						
-						imgWrapper.appendChild(img);
-						imgWrapper.appendChild(playBtn);
-						
-						// Add pin indicator if playlist is pinned
-						if (isPinned(playlist.id)) {
-							const pinIndicator = el('div', { class: 'card-pin-indicator' });
-							const pinSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-							pinSvg.setAttribute('viewBox', '0 0 24 24');
-							pinSvg.setAttribute('fill', 'currentColor');
-							const pinPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-							pinPath.setAttribute('d', 'M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z');
-							pinSvg.appendChild(pinPath);
-							pinIndicator.appendChild(pinSvg);
-							imgWrapper.appendChild(pinIndicator);
 						}
-						
-						handleImageError(imgWrapper, img);
-						
-						const card = el('div', { class: 'card' }, [
-							imgWrapper,
-							el('div', { class: 'meta' }, [
-								el('div', { class: 'title' }, [playlist.title || 'Untitled'])
-							])
-						]);
-						card.addEventListener('click', (e) => {
-							if (!e.target.closest('.card-play-btn')) {
-								location.hash = `playlist/${playlist.id}`;
-							}
-						});
-						
-						// Add context menu handler
+					});
+					
 					card.addEventListener('contextmenu', async (e) => {
 						e.preventDefault();
 						if (window.playlistContextMenu) {
 							await window.playlistContextMenu.show(e.clientX, e.clientY, playlist);
 						}
 					});
-						
-						return card;
-					}))
+					
+					return card;
+				},
+				{ 
+					initialBatch: 40, 
+					batchSize: 40, 
+					containerClass: 'library-grid',
+					onLoadMore: (currentType === 'playlists' || currentType === 'all') && (currentType === 'all' ? allTabFetchStates.playlists.hasMore : libraryFetchState.hasMore) ? () => loadMoreLibraryData('playlists') : null
+				}
+			);
+			
+			// Store update function for later use
+			gridUpdateFunctions.playlists = updatePlaylists;
+			
+			// Use total count if available, otherwise use loaded count
+			const playlistCount = totalCounts.playlists > 0 ? totalCounts.playlists : playlists.length;
+			
+			sections.push(
+				el('div', { class: 'library-section' }, [
+					el('h2', { class: 'library-section-title' }, [`Playlists (${playlistCount})`]),
+					playlistsGrid
 				])
 			);
 		}
@@ -1869,7 +2734,7 @@ async function renderLibrary() {
 				currentCreator = ''; // Reset creator filter
 			}
 			
-			loadLibrary();
+			loadLibrary(true);
 		});
 	});
 	
@@ -1889,7 +2754,7 @@ async function renderLibrary() {
 	
 	sortSelect.addEventListener('change', (e) => {
 		currentSort = e.target.value;
-		loadLibrary();
+		loadLibrary(true);
 	});
 	
 	// Initial load
@@ -1899,7 +2764,7 @@ async function renderLibrary() {
 	} else {
 		creatorSelect.style.display = 'none';
 	}
-	loadLibrary();
+	await loadLibrary(true);
 	
 	// Listen for playlist pin changes to refresh the view
 	window.addEventListener('playlistPinChanged', () => {
@@ -1909,29 +2774,9 @@ async function renderLibrary() {
 	// Listen for favorite changes to update library silently
 	window.addEventListener('favoritesChanged', async (e) => {
 		console.log('Favorites changed, updating library data silently...');
-		// Reload data in background without showing loading state
-		const res = await window.api.getLibrary({ type: currentType === 'favourites' ? 'all' : currentType, sortBy: currentSort, limit: 10000 });
-		if (res.ok) {
-			allData = res;
-			console.log('Library data updated:', {
-				albums: allData.albums.length,
-				playlists: allData.playlists.length,
-				favoritedAlbums: allData.albums.filter(a => a.isFavorite).length,
-				favoritedPlaylists: allData.playlists.filter(p => p.isFavorite).length
-			});
-			
-			// Add owner names to playlists from the allUsers list
-			allData.playlists.forEach(playlist => {
-				if (playlist.ownerId) {
-					const owner = allUsers.find(u => u.id === playlist.ownerId);
-					playlist.ownerName = owner ? owner.name : '';
-				}
-			});
-			
-			// Only re-render if we're on the favourites tab
-			if (currentType === 'favourites') {
-				filterAndDisplay();
-			}
+		// Only reload if we're on the favourites tab
+		if (currentType === 'favourites') {
+			await loadLibrary(true);
 		}
 	});
 }
@@ -2281,28 +3126,6 @@ function getPlaybackSettings() {
 function savePlaybackSettings(settings) {
 	if (!currentUserId) return;
 	localStorage.setItem(`playbackSettings_${currentUserId}`, JSON.stringify(settings));
-}
-
-// Discord settings functions
-const DEFAULT_DISCORD_SETTINGS = {
-	enabled: false,
-	clientId: ''
-};
-
-function getDiscordSettings() {
-	const stored = localStorage.getItem('discordSettings');
-	if (stored) {
-		try {
-			return { ...DEFAULT_DISCORD_SETTINGS, ...JSON.parse(stored) };
-		} catch (e) {
-			return DEFAULT_DISCORD_SETTINGS;
-		}
-	}
-	return DEFAULT_DISCORD_SETTINGS;
-}
-
-function saveDiscordSettings(settings) {
-	localStorage.setItem('discordSettings', JSON.stringify(settings));
 }
 
 async function renderSettings() {
@@ -2692,7 +3515,27 @@ async function renderSettings() {
 	]);
 	
 	// Get Discord settings
-	const discordSettings = getDiscordSettings();
+	let discordSettings = { enabled: false, clientId: '1355908069091180664', jellyfinUrl: '', jellyfinApiKey: '', jellyfinUsers: [] };
+	try {
+		const settingsRes = await window.api.discordGetSettings();
+		if (settingsRes && settingsRes.ok && settingsRes.settings) {
+			discordSettings = settingsRes.settings;
+		}
+	} catch (error) {
+		console.error('Failed to load Discord settings:', error);
+	}
+	
+	// Get current server URL from credentials
+	try {
+		const creds = await window.api.loadCredentials();
+		if (creds && creds.ok && creds.credentials && creds.credentials.serverUrl) {
+			if (!discordSettings.jellyfinUrl) {
+				discordSettings.jellyfinUrl = creds.credentials.serverUrl.replace(/\/$/, '');
+			}
+		}
+	} catch (error) {
+		console.error('Failed to load server URL:', error);
+	}
 	
 	// Discord Enable checkbox
 	const discordEnableCheckbox = el('input', { type: 'checkbox', id: 'discord-enable', class: 'settings-checkbox' });
@@ -2714,15 +3557,15 @@ async function renderSettings() {
 		id: 'discord-client-id', 
 		class: 'settings-input',
 		placeholder: 'Enter your Discord Application ID',
-		value: discordSettings.clientId || ''
+		value: discordSettings.clientId || '1355908069091180664'
 	});
 	
 	const clientIdGroup = el('div', { class: 'settings-group' }, [
 		el('label', { class: 'settings-label' }, ['Discord Application ID']),
 		el('p', { class: 'settings-description' }, [
-			'Create an application at ',
-			el('a', { href: '#', class: 'settings-link' }, ['Discord Developer Portal']),
-			' and paste your Application ID here.'
+			'Create an application named "Jellify" at ',
+			el('a', { href: '#', class: 'settings-link', target: '_blank' }, ['Discord Developer Portal']),
+			' and paste your Application ID here. The application name determines what Discord shows (e.g., "Listening to Jellify").'
 		]),
 		clientIdInput
 	]);
@@ -2731,10 +3574,45 @@ async function renderSettings() {
 	const discordLink = clientIdGroup.querySelector('.settings-link');
 	discordLink.addEventListener('click', (e) => {
 		e.preventDefault();
-		require('electron').shell.openExternal('https://discord.com/developers/applications');
+		if (window.require) {
+			window.require('electron').shell.openExternal('https://discord.com/developers/applications');
+		}
 	});
 	
 	discordSection.appendChild(clientIdGroup);
+	
+	// Jellyfin API Key input
+	const apiKeyInput = el('input', { 
+		type: 'password', 
+		id: 'discord-jellyfin-api-key', 
+		class: 'settings-input',
+		placeholder: 'Enter your Jellyfin API key',
+		value: discordSettings.jellyfinApiKey || ''
+	});
+	
+	const apiKeyToggle = el('button', { 
+		type: 'button',
+		class: 'settings-input-toggle',
+		style: 'position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #fff; cursor: pointer; padding: 5px;'
+	}, ['👁️']);
+	
+	apiKeyToggle.addEventListener('click', () => {
+		const type = apiKeyInput.type === 'password' ? 'text' : 'password';
+		apiKeyInput.type = type;
+	});
+	
+	const apiKeyGroup = el('div', { class: 'settings-group' }, [
+		el('label', { class: 'settings-label' }, ['Jellyfin API Key']),
+		el('p', { class: 'settings-description' }, [
+			'Create an API key in your Jellyfin dashboard (Settings → API Keys). This is required for Discord Rich Presence to work.'
+		]),
+		el('div', { style: 'position: relative;' }, [
+			apiKeyInput,
+			apiKeyToggle
+		])
+	]);
+	
+	discordSection.appendChild(apiKeyGroup);
 	
 	// Discord status indicator
 	const discordStatusDiv = el('div', { class: 'settings-group' }, [
@@ -2757,7 +3635,7 @@ async function renderSettings() {
 				statusText.textContent = 'Connected';
 			} else {
 				statusDot.style.backgroundColor = '#f04747';
-				statusText.textContent = 'Disconnected';
+				statusText.textContent = 'Disconnected (Discord may not be running)';
 			}
 		});
 	}
@@ -2843,15 +3721,39 @@ async function renderSettings() {
 			localStorage.setItem('autoLoginEnabled', autoLoginCheckbox.checked);
 			
 			// Save Discord settings
-			const newDiscordSettings = {
-				enabled: discordEnableCheckbox.checked,
-				clientId: clientIdInput.value.trim()
-			};
-			saveDiscordSettings(newDiscordSettings);
+			const jellyfinApiKey = apiKeyInput.value.trim();
+			const discordClientId = clientIdInput.value.trim() || '1355908069091180664';
 			
-			// Update Discord RPC with new settings
-			if (window.api && window.api.discordUpdateClientId) {
-				await window.api.discordUpdateClientId(newDiscordSettings.clientId, newDiscordSettings.enabled);
+			// Get current logged-in server URL automatically
+			let currentServerUrl = null;
+			try {
+				const creds = await window.api.loadCredentials();
+				if (creds && creds.ok && creds.credentials && creds.credentials.serverUrl) {
+					currentServerUrl = creds.credentials.serverUrl.replace(/\/$/, '');
+				}
+			} catch (err) {
+				console.error('Failed to get current server URL for Discord RPC:', err);
+			}
+			
+			// Get current logged-in username automatically
+			let currentUsername = null;
+			try {
+				const userRes = await window.api.getCurrentUser();
+				if (userRes.ok && userRes.user && userRes.user.Name) {
+					currentUsername = userRes.user.Name;
+				}
+			} catch (err) {
+				console.error('Failed to get current user for Discord RPC:', err);
+			}
+			
+			if (window.api && window.api.discordUpdateSettings) {
+				await window.api.discordUpdateSettings(
+					currentServerUrl || '',
+					jellyfinApiKey,
+					currentUsername ? [currentUsername] : [],
+					discordClientId,
+					discordEnableCheckbox.checked
+				);
 			}
 			
 			showToast('Settings saved successfully', 'success');
